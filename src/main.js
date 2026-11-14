@@ -56,11 +56,13 @@ class Game {
     this.placeLegs();
     this.swarm.reset();
     this.bindInput();
+    window.addEventListener('pagehide', () => this.records.dirty && this.records.save());
     window.addEventListener('resize', () => this.layout());
     window.visualViewport?.addEventListener('resize', () => this.layout());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         if (this.state === 'play') this.pause();
+        if (this.records.dirty) this.records.save();
         sfx.suspendAudio();
       }
     });
@@ -90,6 +92,9 @@ class Game {
       this.W = clamp(Math.round((540 * cssW) / cssH), 720, 1400);
     }
     this.scale = Math.min(cssW / this.W, cssH / this.H);
+    const cs = getComputedStyle(document.documentElement);
+    const inset = (n) => (parseFloat(cs.getPropertyValue(n)) || 0) / this.scale;
+    this.safe = { t: inset('--sat'), r: inset('--sar'), b: inset('--sab'), l: inset('--sal') };
     this.offX = (cssW - this.W * this.scale) / 2;
     this.offY = (cssH - this.H * this.scale) / 2;
     this.canvas.width = Math.round(cssW * this.dpr);
@@ -174,6 +179,7 @@ class Game {
   }
 
   toMenu() {
+    if (this.records.dirty) this.records.save();
     this.cancelPointer();
     sfx.stopCharge();
     this.state = 'menu';
@@ -211,7 +217,9 @@ class Game {
     c.addEventListener('pointerdown', (e) => this.onDown(e));
     c.addEventListener('pointermove', (e) => this.onMove(e));
     c.addEventListener('pointerup', (e) => this.onUp(e));
-    c.addEventListener('pointercancel', (e) => this.onUp(e));
+    c.addEventListener('pointercancel', (e) => {
+      if (this.pointer && this.pointer.id === e.pointerId) this.cancelPointer();
+    });
     c.addEventListener('lostpointercapture', (e) => this.onUp(e));
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('gesturestart', (e) => e.preventDefault());
@@ -271,7 +279,7 @@ class Game {
     const [x, y] = this.toWorld(e);
     p.x = x;
     p.y = y;
-    if (p.mode === 'aim') {
+    if (p.mode === 'aim' && !p.queued) {
       const [tx, ty] = this.aimPoint(x, y);
       this.foot.aim(tx, ty);
     }
@@ -312,8 +320,8 @@ class Game {
     }
     this.pointer = null;
     if (this.foot.state === 'grinding') this.foot.state = 'planted';
-    if (this.foot.isAirborne()) {
-      // put the foot back down without scoring
+    if (this.foot.state === 'raising' || this.foot.state === 'hover') {
+      // put the foot back down without scoring (a released stomp still lands)
       this.foot.place(this.foot.tx, this.foot.ty);
     }
     this.pressure = 0;
@@ -499,6 +507,7 @@ class Game {
 
   /** Menu backdrop: ants keep walking, nothing scores. */
   ambient(dt) {
+    this.lastDt = dt;
     this.elapsed = Math.min(this.elapsed + dt, 20);
     this.swarm.update(dt, null);
     this.feetBlockAnts();
@@ -519,6 +528,7 @@ class Game {
   }
 
   update(dt) {
+    this.lastDt = dt;
     this.elapsed += dt;
     const foot = this.foot;
     const ptr = this.pointer;
@@ -587,7 +597,7 @@ class Game {
   grind(dt, ptr) {
     const foot = this.foot;
     const s = this.session;
-    s.crush = Math.round((s.crush + dt) * 100) / 100;
+    s.crush += dt;
     // drag the planted heel slowly toward the finger
     const want = clamp(ptr.x - this.grindX, 50, this.W - 50);
     const maxStep = 140 * dt;
@@ -615,7 +625,7 @@ class Game {
   /** Walking ants turn away instead of walking through a planted boot. */
   feetBlockAnts() {
     for (const leg of [this.foot, this.backLeg]) {
-      if (leg.state !== 'planted' && leg.state !== 'grinding') continue;
+      if (leg.state !== 'planted') continue;
       const fp = leg.footprint(leg.x, leg.y, 0);
       for (const a of this.swarm.ants) {
         if (a.state !== 'walk') continue;
@@ -623,8 +633,8 @@ class Game {
         if (d < 1) {
           // head the other way, nudged toward the nearer edge of the boot
           a.dir = a.x < fp.x ? -1 : 1;
-          a.x += a.dir * 1.5;
-          a.y += a.y < fp.y ? -0.6 : 0.6;
+          a.x += a.dir * 90 * this.lastDt;
+          a.y += (a.y < fp.y ? -36 : 36) * this.lastDt;
         }
       }
     }
@@ -703,6 +713,7 @@ class Game {
 const ui = {
   game: null,
   show(name) {
+    if (name === 'over') this.shownAt = performance.now();
     for (const id of ['menu', 'pause', 'over', 'loading']) {
       $(id).hidden = id !== name;
     }
@@ -785,6 +796,12 @@ async function boot() {
   ui.game = game;
   window.__game = game; // handy for debugging in the console
 
+  document.addEventListener('click', (e) => {
+    if (e.target.closest?.('button') && ui.shownAt && performance.now() - ui.shownAt < 450) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
   $('btn-timed').addEventListener('click', () => game.start('timed'));
   $('btn-endless').addEventListener('click', () => game.start('endless'));
   $('btn-sound').addEventListener('click', () => {

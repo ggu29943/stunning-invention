@@ -179,7 +179,7 @@ export class FX {
       this.decalFade = 0;
       const g = this.dctx;
       g.globalCompositeOperation = 'destination-out';
-      g.fillStyle = 'rgba(0,0,0,0.05)';
+      g.fillStyle = 'rgba(0,0,0,0.12)';
       g.fillRect(0, 0, this.decals.width, this.decals.height);
       g.globalCompositeOperation = 'source-over';
     }

@@ -71,7 +71,8 @@ function shadowText(ctx, str, x, y, color = '#fff') {
 
 export function pauseButtonRect(g) {
   const pw = portraitWidth(g);
-  return { x: g.W - pw - 14 - 40, y: 14, w: 36, h: 36 };
+  const sf = g.safe || { t: 0, r: 0 };
+  return { x: g.W - pw - 14 - 40 - sf.r, y: 14 + sf.t, w: 36, h: 36 };
 }
 
 function portraitWidth(g) {
@@ -87,7 +88,9 @@ export function drawHUD(ctx, g, assets) {
   // ---- top-left counters
   const compact = g.W < 700;
   ctx.font = `800 ${compact ? 15 : 17}px ${FONT}`;
-  const timeVal = g.mode === 'timed' ? Math.max(0, g.timeLimit - g.elapsed) : g.elapsed;
+  const timeVal = g.mode === 'timed' ? Math.ceil(Math.max(0, g.timeLimit - g.elapsed)) : g.elapsed;
+  const sf = g.safe || { t: 0, r: 0, l: 0 };
+  ctx.translate(sf.l, sf.t);
   let x = 18;
   const y = 30;
   const items = [
@@ -150,8 +153,10 @@ export function drawHUD(ctx, g, assets) {
   ctx.fillText('PRESSURE', -2, 14);
   ctx.restore();
 
+  ctx.translate(-sf.l - sf.r, 0);
   // ---- portrait (top-right)
   drawPortrait(ctx, g, assets);
+  ctx.translate(sf.r, -sf.t); // back to unshifted coords; pauseButtonRect applies insets itself
 
   // ---- pause button
   const pb = pauseButtonRect(g);
@@ -165,7 +170,7 @@ export function drawHUD(ctx, g, assets) {
   // ---- final countdown
   if (g.mode === 'timed' && g.state === 'play') {
     const left = g.timeLimit - g.elapsed;
-    if (left < 5.5 && left > 0) {
+    if (left <= 5 && left > 0) {
       const n = Math.ceil(left);
       const k = n - left;
       ctx.globalAlpha = 1 - k * 0.6;
