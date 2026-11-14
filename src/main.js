@@ -41,8 +41,8 @@ class Game {
     this.comboWindow = COMBO_WINDOW;
     this.comboPulse = 0;
     this.portraitPulse = 0;
-    this.blinkT = 0;
-    this.nextBlink = 3;
+    this.redMix = 0;
+    this.moodT = 0;
     this.gain = 0;
     this.gainT = 0;
     this.hitstop = 0;
@@ -104,6 +104,8 @@ class Game {
 
     this.bandBot = this.H - (this.portrait ? 70 : 34);
     this.bandTop = this.bandBot - (this.portrait ? 150 : 112);
+    // on-screen sole length of a planted boot (sets how big the boots are)
+    this.soleLen = this.portrait ? 165 : 205;
     this.walkTop = this.bandTop - 30;
     this.scene = buildScene(this.W, this.H, { walkTop: this.walkTop, bandTop: this.bandTop, bandBot: this.bandBot });
     this.fx.resize(this.W, this.H, this.walkTop);
@@ -126,7 +128,7 @@ class Game {
   placeLegs() {
     const y = this.bandTop + (this.bandBot - this.bandTop) * 0.75;
     this.foot.place(this.W * (this.portrait ? 0.4 : 0.45), y);
-    this.backLeg.place(this.foot.x + 175, y - 30);
+    this.backLeg.place(this.foot.x + this.soleLen * 0.95, y - 30);
   }
 
   // ------------------------------------------------------------------ flow
@@ -405,6 +407,7 @@ class Game {
       this.gain = ego;
       this.gainT = 1.6;
       this.portraitPulse = Math.min(1, 0.4 + dead.length * 0.05);
+      if (full || dead.length >= 8) this.moodT = 2.2;
       this.fx.text(fp.x, foot.y - 70, `+${ego}`, { size: 18 + Math.min(18, dead.length), color: full ? '#ff4fa3' : '#ffe14f' });
       if (dead.length >= 2) {
         this.fx.text(fp.x, foot.y - 98, `×${dead.length}`, { size: 14, color: '#fff', life: 0.7 });
@@ -462,14 +465,15 @@ class Game {
     const f = this.foot;
     const b = this.backLeg;
     const gap = b.x - f.x;
-    const far = Math.abs(gap) > Math.max(240, this.W * 0.32);
-    const close = Math.abs(gap) < 120;
+    const far = Math.abs(gap) > Math.max(this.soleLen * 1.35, this.W * 0.32);
+    const close = Math.abs(gap) < this.soleLen * 0.7;
     if (!far && !close) return;
     let side = gap >= 0 ? 1 : -1;
-    let tx = f.x + side * 175;
+    const step = this.soleLen * 0.95;
+    let tx = f.x + side * step;
     if (tx < 60 || tx > this.W - 60) {
       side = -side;
-      tx = f.x + side * 175;
+      tx = f.x + side * step;
     }
     const ty = clamp(f.y - 30, this.bandTop + 16, this.bandBot - 10);
     b.stepTo(clamp(tx, 60, this.W - 60), ty);
@@ -519,12 +523,11 @@ class Game {
     this.portraitPulse = Math.max(0, this.portraitPulse - dt * 2.5);
     this.comboPulse = Math.max(0, this.comboPulse - dt * 5);
     this.gainT = Math.max(0, this.gainT - dt);
-    this.blinkT -= dt;
-    this.nextBlink -= dt;
-    if (this.nextBlink <= 0) {
-      this.blinkT = 0.14;
-      this.nextBlink = rand(2.5, 5);
-    }
+    // portrait mood: cross-fade to the red-eyed face while the pressure is
+    // full and for a moment after a big stomp
+    this.moodT = Math.max(0, this.moodT - dt);
+    const wantRed = (this.state === 'play' && this.pressure >= 1) || this.moodT > 0 ? 1 : 0;
+    this.redMix += clamp(wantRed - this.redMix, -dt * 3, dt * 5);
   }
 
   update(dt) {

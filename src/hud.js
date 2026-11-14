@@ -75,8 +75,8 @@ export function pauseButtonRect(g) {
   return { x: g.W - pw - 14 - 40 - sf.r, y: 14 + sf.t, w: 36, h: 36 };
 }
 
-function portraitWidth(g) {
-  return Math.round(127 * (g.W < 700 ? 0.82 : 0.95));
+export function portraitWidth(g) {
+  return g.W < 700 ? 118 : 140;
 }
 
 export function drawHUD(ctx, g, assets) {
@@ -185,9 +185,9 @@ export function drawHUD(ctx, g, assets) {
 
 function drawPortrait(ctx, g, assets) {
   const { img } = assets;
-  const sc = g.W < 700 ? 0.82 : 0.95;
-  const fw = 127 * sc;
-  const fh = 130 * sc;
+  const fw = portraitWidth(g);
+  const fh = fw;
+  const sc = fw / 140;
   const bounce = 1 + g.portraitPulse * 0.08;
   const x = g.W - fw - 12;
   const y = 12;
@@ -197,30 +197,46 @@ function drawPortrait(ctx, g, assets) {
   ctx.translate(-fw / 2, -fh / 2);
   if (g.portraitPulse > 0) ctx.translate((Math.random() - 0.5) * 4 * g.portraitPulse, 0);
 
-  // backing + face clipped to the frame's inner area
+  const r = 15 * sc;
+  // backing + face, clipped to the inside of the frame
   ctx.save();
-  roundRect(ctx, 5 * sc, 5 * sc, fw - 10 * sc, fh - 10 * sc, 12 * sc);
+  roundRect(ctx, 2, 2, fw - 4, fh - 4, r);
   const bg = ctx.createLinearGradient(0, 0, 0, fh);
   bg.addColorStop(0, '#5a2a63');
   bg.addColorStop(1, '#a33d6d');
   ctx.fillStyle = bg;
   ctx.fill();
   ctx.clip();
-  const blink = g.blinkT > 0;
-  const face = blink ? img.face_1 : img.face_0;
-  const fs = (fw - 6 * sc) / face.width;
-  ctx.drawImage(face, 3 * sc, fh - face.height * fs - 3 * sc, face.width * fs, face.height * fs);
+  // green-eyed normally, red-eyed when the pressure is full or after a big stomp
+  const size = fw * 1.06;
+  const fx = (fw - size) / 2;
+  const fy = fh - size + 2;
+  const mix = clamp(g.redMix || 0, 0, 1);
+  if (mix < 1) ctx.drawImage(img.face_green, fx, fy, size, size);
+  if (mix > 0) {
+    ctx.globalAlpha = mix;
+    ctx.drawImage(img.face_red, fx, fy, size, size);
+    ctx.globalAlpha = 1;
+  }
   if (g.pressure >= 1 || g.portraitPulse > 0.3) {
-    ctx.fillStyle = `rgba(255, 30, 80, ${g.pressure >= 1 ? 0.18 + Math.sin(g.time * 20) * 0.08 : g.portraitPulse * 0.25})`;
+    ctx.fillStyle = `rgba(255, 30, 80, ${g.pressure >= 1 ? 0.14 + Math.sin(g.time * 20) * 0.06 : g.portraitPulse * 0.2})`;
     ctx.fillRect(0, 0, fw, fh);
   }
   ctx.restore();
-  ctx.drawImage(img.frame, 0, 0, fw, fh);
+  // frame: same look as the frame in the provided sheet (grey rim with dark
+  // edges), drawn as vectors so it stays sharp on high-DPI screens
+  roundRect(ctx, 2, 2, fw - 4, fh - 4, r);
+  ctx.lineWidth = 6 * Math.max(0.8, sc);
+  ctx.strokeStyle = 'rgba(8, 4, 10, 0.85)';
+  ctx.stroke();
+  ctx.lineWidth = 3.4 * Math.max(0.8, sc);
+  ctx.strokeStyle = '#626262';
+  ctx.stroke();
   ctx.restore();
 
   // ego circles
   const lv = egoLevel(g.session.ego);
-  const r = 6.5 * sc + 0.5;
+  const cr = 6.5 * sc + 0.8;
   const gap = (fw - 12) / 6;
   const cy = y + fh + 13;
   for (let i = 0; i < 6; i++) {
@@ -229,20 +245,20 @@ function drawPortrait(ctx, g, assets) {
     const fill = clamp((g.session.ego - lo) / (EGO_LEVELS[i] - lo), 0, 1);
     ctx.fillStyle = 'rgba(16, 6, 22, 0.6)';
     ctx.beginPath();
-    ctx.arc(cx, cy, r + 1.5, 0, Math.PI * 2);
+    ctx.arc(cx, cy, cr + 1.5, 0, Math.PI * 2);
     ctx.fill();
     if (fill > 0) {
       ctx.fillStyle = i < lv ? '#ffe14f' : '#fff';
       ctx.beginPath();
       ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * fill);
+      ctx.arc(cx, cy, cr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * fill);
       ctx.closePath();
       ctx.fill();
     }
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(cx, cy, cr, 0, Math.PI * 2);
     ctx.stroke();
   }
 
