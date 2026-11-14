@@ -473,7 +473,8 @@ class Game {
       this.lastLevel = lv;
       this.portraitPulse = 1;
       sfx.ding(true);
-      this.fx.text(this.W - 80, 190, `自尊 Lv.${lv}`, { size: 18, color: '#ffe14f', life: 1.4, vy: -20 });
+      // centred, clear of the portrait and the "+N" gain readout under it
+      this.fx.text(this.W / 2, this.H * 0.2, `自尊 Lv.${lv}`, { size: 26, color: '#ffe14f', life: 1.4, vy: -16 });
     }
   }
 
