@@ -5,10 +5,11 @@ import { clamp, lerp, easeInQuad, easeOutCubic } from './util.js';
 // tip), sole [x, y] (centre of the red sole), shaft [x0, x1, row] (leg width
 // near the top edge, used to extend the leg off-screen).
 //
-// Frames were drawn at slightly different sizes, so every frame is normalised
-// to stand_0: planted frames by sole length (toe tip -> heel tip), lifted
-// frames by shaft width. game.soleLen is the on-screen sole length (logical
-// px) of a planted boot at middle depth.
+// All frames were drawn at the same scale on the artist's canvas, so one
+// sprite->world factor (from stand_0's sole length) is used for every frame;
+// per-frame normalisation would distort the lifted frames, whose diagonal
+// shafts measure wider. game.soleLen is the on-screen sole length (logical px)
+// of a planted boot at middle depth.
 
 export const RAISE_TIME = 0.09;
 export const STOMP_TIME = 0.075;
@@ -18,7 +19,6 @@ export const CHARGE_TIME = 0.85;
 const LIFT_MULT = 1.32; // raised foot is closer to the camera
 
 const soleLen = (m) => m.heel[0] - m.toe[0];
-const shaftW = (m) => m.shaft[1] - m.shaft[0];
 
 export class Leg {
   constructor(game, back = false) {
@@ -59,18 +59,15 @@ export class Leg {
     return this.game.soleLen * this.depthAt(y);
   }
 
-  /** Sprite -> world scale for a frame, for a boot standing at y. */
+  /** Sprite -> world scale (same for every frame), for a boot standing at y. */
   frameScale(name, y = this.y) {
-    const meta = this.meta;
-    const ref = meta.stand_0;
-    const m = meta[name];
-    const base = this.soleAt(y) / soleLen(ref);
-    if (name.startsWith('lift')) return base * (shaftW(ref) / shaftW(m));
-    return base * (soleLen(ref) / soleLen(m));
+    return this.soleAt(y) / soleLen(this.meta.stand_0);
   }
 
   hoverHeight(pressure) {
-    return (150 + 70 * pressure) * (this.game.soleLen / 205);
+    // sole centre height above the aim point; even at zero pressure the
+    // stiletto clears the street by a visible gap
+    return (190 + 70 * pressure) * (this.game.soleLen / 205);
   }
 
   /** Footprint ellipse (kill zone) plus the stiletto tip, for a boot at x, y. */
@@ -98,8 +95,17 @@ export class Leg {
    * an accidental grind.
    */
   hitBox() {
-    const L = this.soleAt();
-    return { x0: this.x - L * 0.6, x1: this.x + L * 0.65, y0: 0, y1: this.game.bandTop - 4 };
+    // the drawn leg (shaft of stand_0) plus some finger slop
+    const m = this.meta.stand_0;
+    const s = this.frameScale('stand_0');
+    const ax = (m.toe[0] + m.heel[0]) / 2;
+    const pad = this.soleAt() * 0.15;
+    return {
+      x0: this.x + (m.shaft[0] - ax) * s - pad,
+      x1: this.x + (m.shaft[1] - ax) * s + pad,
+      y0: 0,
+      y1: this.game.bandTop - 4,
+    };
   }
 
   raise(tx, ty) {
@@ -219,7 +225,8 @@ export class Leg {
         const k = clamp(this.t / STEP_TIME, 0, 1);
         const x = lerp(this.fromX, this.tx, easeOutCubic(k));
         const yGround = lerp(this.fromY, this.ty, k);
-        const lift = Math.sin(k * Math.PI);
+        // toe is back on the ground exactly when the frame switches to stand_1
+        const lift = Math.sin(Math.min(1, k / 0.85) * Math.PI);
         const name = k < 0.85 ? 'lift_0' : 'stand_1';
         const s = this.frameScale(name, yGround);
         if (name === 'lift_0') {
@@ -228,8 +235,7 @@ export class Leg {
           const tipX = m.toe[0];
           const dx = x - (soleLen(meta.stand_1) * this.frameScale('stand_1', yGround)) / 2 - tipX * s;
           const dy = yGround - lift * 60 * (this.game.soleLen / 205) - m.toe[2] * s;
-          drawShaft(ctx, pick(name), m, dx, dy, s);
-          ctx.drawImage(pick(name), dx, dy, m.w * s, m.h * s);
+          drawSprite(ctx, pick(name), m, dx, dy, s);
         } else {
           drawPlanted(ctx, pick(name), meta[name], x, yGround - lift * 20, s, 1);
         }
@@ -250,16 +256,13 @@ export class Leg {
           this.state === 'raising'
             ? lerp(this.fromX, this.hoverX, easeOutCubic(clamp(this.t / RAISE_TIME, 0, 1)))
             : this.hoverX;
-        // On landing the sole centre sits where it is in the planted pose.
-        const st = meta.stand_0;
-        const soleAbove = (st.toe[2] - st.sole[1]) * this.frameScale('stand_0', this.hoverY) * 0.6;
-        const groundSole = this.hoverY - soleAbove;
+        // on landing the lowest point of the lift frame (toe[2]) meets the street
+        const groundSole = this.hoverY - (m.toe[2] - m.sole[1]) * s;
         const sx = baseX + (Math.random() - 0.5) * tremble;
         const sy = lerp(groundSole, this.hoverY - this.hoverHeight(pressure), lift) + (Math.random() - 0.5) * tremble;
         const dx = sx - m.sole[0] * s;
         const dy = sy - m.sole[1] * s;
-        drawShaft(ctx, img[name], m, dx, dy, s);
-        ctx.drawImage(img[name], dx, dy, m.w * s, m.h * s);
+        drawSprite(ctx, img[name], m, dx, dy, s);
         break;
       }
       default:
@@ -269,23 +272,22 @@ export class Leg {
 }
 
 /**
- * Continue the leg above the sprite's top edge (when the boot does not reach
- * the top of the screen) by stretching a thin slice of the shaft upward.
+ * Draw a boot sprite with its top at dy. The leg is continued upward by
+ * stretching the shaft row (the first row that is solid edge to edge, see
+ * tools/extract_hd.py) to above the screen; everything above that row in the
+ * sprite (the wavy hand-cut top) is replaced by the stretched row, so the
+ * leg never looks hollow or notched.
  */
-function drawShaft(ctx, image, m, dx, dy, s) {
+function drawSprite(ctx, image, m, dx, dy, s, sy = 1) {
   const top = -40;
-  const row = m.shaft ? m.shaft[2] : 4;
-  const destBottom = dy + (row + 2) * s;
-  if (destBottom > top) {
-    ctx.drawImage(image, 0, row, m.w, 3, dx, top, m.w * s, destBottom - top);
-  }
+  const row = m.shaft[2];
+  const yRow = dy + row * s * sy;
+  if (yRow > top) ctx.drawImage(image, 0, row, m.w, 2, dx, top, m.w * s, yRow - top + 1);
+  ctx.drawImage(image, 0, row, m.w, m.h - row, dx, yRow, m.w * s, (m.h - row) * s * sy);
 }
 
 function drawPlanted(ctx, image, m, x, y, s, squashY) {
   const ax = (m.toe[0] + m.heel[0]) / 2;
   const ay = m.toe[2];
-  const dx = x - ax * s;
-  const dy = y - ay * s * squashY;
-  drawShaft(ctx, image, m, dx, dy, s);
-  ctx.drawImage(image, dx, dy, m.w * s, m.h * s * squashY);
+  drawSprite(ctx, image, m, x - ax * s, y - ay * s * squashY, s, squashY);
 }

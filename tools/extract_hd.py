@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Cut the high-resolution storyboard images (assets/source/hd/*.png) into
-game sprites with alpha, plus landmark metadata.
+"""Turn the storyboard images in assets/source/hd/*.png into game sprites
+(assets/sprites/hd/<name>.webp) plus landmark metadata (sprites.json).
 
-Same problem as the original sheet: the boots are pure black on a pure black
-background, so the silhouette is rebuilt from the visible highlights
-(morphological closing + an "orthogonal hull": inside if there is ink on both
-sides along the row AND along the column), which keeps the open gap under the
-arch transparent while filling the black leather.
+The sources are hand-cut PNGs with transparency, and their alpha is used as is.
+For a source without alpha (black boot on black background), the silhouette is
+rebuilt from the visible highlights: morphological closing plus an
+"orthogonal hull" (inside if there is ink on both sides along the row AND the
+column), which fills the black leather but keeps the gap under the arch open.
 
-Output: assets/sprites/hd/<name>.webp and assets/sprites/hd/sprites.json
-Usage:  python3 tools/extract_hd.py [--preview out.png]
+Landmarks (sprite pixels) used by src/foot.js: toe [x0, x1, groundY],
+heel [x, y] (stiletto tip), sole [x, y] (red sole centre), shaft
+[x0, x1, row] (first solid row near the top; the game stretches it upward).
+
+Usage:  python3 tools/extract_hd.py [--preview out.jpg]
 Needs:  pillow (with WebP), numpy, scipy
 """
 import json
@@ -152,10 +155,20 @@ def boot_points(alpha, rgb):
     red = (r > 130) & (g < 70) & (b < 80) & a
     ys, xs = np.nonzero(red)
     sole = [int(xs.mean()), int(ys.mean())] if len(xs) > 400 else None
+    # Shaft row: the game stretches this row up to the top of the screen and
+    # draws the sprite only from here down, so it must be one solid run of
+    # leather. Hand-cut tops are wavy/open, so take the first row whose
+    # neighbourhood (bilinear sampling reads r-1..r+2) is solid edge to edge.
+    def solid(y):
+        xs = np.nonzero(alpha[y] > 0.5)[0]
+        return len(xs) > 4 and alpha[y, xs.min() + 2:xs.max() - 1].min() > 0.9
     tops = np.nonzero(a.any(axis=1))[0]
-    trow = int(tops.min()) + max(2, int(h * 0.01))
-    row = np.nonzero(a[trow])[0]
-    shaft = [int(row.min()), int(row.max()), trow] if len(row) else None
+    shaft = None
+    for r in range(max(1, int(tops.min()) + 1), h // 4):
+        if all(solid(y) for y in range(r - 1, r + 3)):
+            xs = np.nonzero(alpha[r] > 0.5)[0]
+            shaft = [int(xs.min()), int(xs.max()), r]
+            break
     return {"toe": toe, "heel": heel, "sole": sole, "shaft": shaft, "bbox": [x0, x1]}
 
 

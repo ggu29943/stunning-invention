@@ -49,20 +49,28 @@ src/hud.js              计时、击杀、压力条、头像、自尊圈
 src/scene.js            程序生成的夜景街道（像素风）
 src/audio.js            WebAudio 合成音效（无音频文件）
 src/stats.js            纪录与本局统计
-assets/source/sheet.jpg 原始素材图
-assets/sprites/         从素材图切出的透明 PNG 与锚点数据
-tools/extract_sprites.py 切图脚本
+assets/source/hd/       原作者提供的高清素材（已抠好透明背景）
+assets/sprites/hd/      游戏用的 WebP 精灵与锚点数据（由脚本生成）
+tools/extract_hd.py     素材 → 精灵 + 锚点
 ```
 
 ## 素材
 
-高跟鞋与角色头像来自原作者提供的素材图（`assets/source/sheet.jpg`），已获原作者授权在本项目中使用。如果要公开发布或商用，请再向原作者确认授权范围。
+高跟鞋和角色头像来自原作者提供的高清素材（`assets/source/hd/`，透明背景由作者手工抠好），已获原作者授权在本项目中使用。如果要公开发布或商用，请再向原作者确认授权范围。
 
-素材图是黑底 JPEG，鞋身本身也是纯黑，没法直接抠掉背景。`tools/extract_sprites.py` 用"高光轮廓 + 正交凸包 + 形态学闭运算"重建每帧的剪影作为透明通道，同时算出鞋尖、鞋跟、鞋底中心等锚点，写进 `assets/sprites/sprites.json`。更换素材后重新运行：
+`tools/extract_hd.py` 负责处理素材：
+- 裁掉空白，缩到合适大小，转成 WebP（每张约 30 KB）
+- 算出每帧的鞋尖、鞋跟尖、红色鞋底中心和靴筒"拉伸行"，写进 `assets/sprites/hd/sprites.json`
+
+游戏里用这些锚点决定踩踏范围、落地对齐，以及把腿向上延伸出屏幕。更换素材后重新运行：
 
 ```bash
 pip install pillow numpy scipy
-python3 tools/extract_sprites.py
+python3 tools/extract_hd.py --preview /tmp/preview.jpg
 ```
 
-背景城市、蚂蚁、界面和音效都是代码生成的，没有使用其他素材。
+如果某帧缺少必需的锚点，游戏会在加载时直接报错，不会进到一半卡死。
+
+头像有两张：平时用绿眼（`12_green_portrait`），满压或一脚踩死很多只时渐变成红眼（`13_red_portrait`）。
+
+背景城市、蚂蚁、界面和音效都是代码生成的，没有使用其他素材。WebP 需要 iOS 14 / Safari 14 及以上。

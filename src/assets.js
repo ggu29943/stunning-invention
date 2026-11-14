@@ -31,6 +31,20 @@ export async function loadAssets(onProgress) {
     if (!r.ok) throw new Error('无法加载 sprites.json');
     return r.json();
   });
+  // fail loudly at load time instead of freezing mid-game on a null landmark
+  const NEED = {
+    stand_0: ['toe', 'heel', 'shaft'],
+    stand_1: ['toe', 'heel', 'shaft'],
+    twist_0: ['toe', 'heel', 'shaft'],
+    lift_0: ['toe', 'shaft'],
+    lift_1: ['toe', 'sole', 'shaft'],
+    lift_2: ['toe', 'sole', 'shaft'],
+  };
+  for (const [name, keys] of Object.entries(NEED)) {
+    for (const k of keys) {
+      if (!Array.isArray(meta[name]?.[k])) throw new Error(`sprites.json 缺少 ${name}.${k}`);
+    }
+  }
   const img = {};
   let done = 0;
   await Promise.all(

@@ -1,6 +1,7 @@
 import { store } from './util.js';
 
-const KEY = 'heelstomp.records.v1';
+export const RECORDS_KEY = 'heelstomp.records.v1';
+const KEY = RECORDS_KEY;
 
 // Records shown as "+N 名称" popups while playing, like the original.
 export const RECORDS = [
@@ -81,7 +82,18 @@ export class Records {
     }
   }
 
+  /** Take any higher values another tab has saved (in memory only). */
+  merge() {
+    const disk = store.get(KEY, {});
+    for (const [k, v] of Object.entries(disk)) {
+      if (typeof v === 'number' && !(this.best[k] >= v)) this.best[k] = v;
+    }
+  }
+
   save() {
+    // another tab may have saved since we loaded: never write a lower value
+    // over a higher one
+    this.merge();
     this.dirty = false;
     this.saveTimer = 0;
     store.set(KEY, this.best);

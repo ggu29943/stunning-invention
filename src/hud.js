@@ -37,10 +37,10 @@ function iconAnt(ctx, x, y) {
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   for (const lx of [-2, 1, 4]) {
-    ctx.moveTo(lx, y + 1);
-    ctx.lineTo(lx - 2, y + 6);
-    ctx.moveTo(lx, y + 1);
-    ctx.lineTo(lx + 2, y + 6);
+    ctx.moveTo(x + lx, y + 1);
+    ctx.lineTo(x + lx - 2, y + 6);
+    ctx.moveTo(x + lx, y + 1);
+    ctx.lineTo(x + lx + 2, y + 6);
   }
   ctx.stroke();
   ctx.fillStyle = '#ff3b5c';
@@ -72,7 +72,8 @@ function shadowText(ctx, str, x, y, color = '#fff') {
 export function pauseButtonRect(g) {
   const pw = portraitWidth(g);
   const sf = g.safe || { t: 0, r: 0 };
-  return { x: g.W - pw - 14 - 40 - sf.r, y: 14 + sf.t, w: 36, h: 36 };
+  // 26 px clear of the portrait, which bounces up to 8% larger after a stomp
+  return { x: g.W - pw - 12 - 26 - 36 - sf.r, y: 14 + sf.t, w: 36, h: 36 };
 }
 
 export function portraitWidth(g) {

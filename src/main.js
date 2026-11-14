@@ -4,7 +4,7 @@ import { buildScene, drawNeons } from './scene.js';
 import { Swarm, drawAnt, depthScale } from './ants.js';
 import { Leg, CHARGE_TIME } from './foot.js';
 import { FX } from './fx.js';
-import { Records, newSession } from './stats.js';
+import { Records, newSession, RECORDS_KEY } from './stats.js';
 import { drawHUD, pauseButtonRect, egoLevel } from './hud.js';
 import * as sfx from './audio.js';
 
@@ -52,6 +52,12 @@ class Game {
 
     this.pointer = null; // { id, x, y, mode: 'aim' | 'grind', queued, released }
 
+    // env(safe-area-inset-*) resolved on a real property, so every engine returns px
+    this.insetProbe = document.createElement('div');
+    this.insetProbe.style.cssText =
+      'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
+      'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+    document.body.appendChild(this.insetProbe);
     this.layout();
     this.placeLegs();
     this.swarm.reset();
@@ -59,6 +65,14 @@ class Game {
     window.addEventListener('pagehide', () => this.records.dirty && this.records.save());
     window.addEventListener('resize', () => this.layout());
     window.visualViewport?.addEventListener('resize', () => this.layout());
+    screen.orientation?.addEventListener?.('change', () => this.layout());
+    window.addEventListener('orientationchange', () => setTimeout(() => this.layout(), 250));
+    // another tab saved records: merge them so neither tab overwrites the other
+    window.addEventListener('storage', (e) => {
+      if (e.key !== RECORDS_KEY) return;
+      this.records.merge(); // no write here, or two tabs would echo each other
+      if (this.state === 'menu') ui.refreshMenu(this);
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         if (this.state === 'play') this.pause();
@@ -76,7 +90,11 @@ class Game {
     const vv = window.visualViewport;
     const cssW = Math.max(1, Math.round(vv ? vv.width : window.innerWidth));
     const cssH = Math.max(1, Math.round(vv ? vv.height : window.innerHeight));
-    if (cssW === this.cssW && cssH === this.cssH && this.scene) return;
+    if (cssW === this.cssW && cssH === this.cssH && this.scene) {
+      // same size, but a 180° rotation can move the notch to the other side
+      this.readInsets();
+      return;
+    }
     const prevW = this.W;
     const prevBandTop = this.bandTop;
     const prevBandBot = this.bandBot;
@@ -92,11 +110,9 @@ class Game {
       this.W = clamp(Math.round((540 * cssW) / cssH), 720, 1400);
     }
     this.scale = Math.min(cssW / this.W, cssH / this.H);
-    const cs = getComputedStyle(document.documentElement);
-    const inset = (n) => (parseFloat(cs.getPropertyValue(n)) || 0) / this.scale;
-    this.safe = { t: inset('--sat'), r: inset('--sar'), b: inset('--sab'), l: inset('--sal') };
     this.offX = (cssW - this.W * this.scale) / 2;
     this.offY = (cssH - this.H * this.scale) / 2;
+    this.readInsets();
     this.canvas.width = Math.round(cssW * this.dpr);
     this.canvas.height = Math.round(cssH * this.dpr);
     this.canvas.style.width = `${cssW}px`;
@@ -119,10 +135,31 @@ class Game {
         a.y = mapY(a.y);
       }
       for (const leg of [this.foot, this.backLeg]) {
+        const falling = leg.state === 'stomping' ? { t: leg.t, tx: mapX(leg.tx), ty: mapY(leg.ty) } : null;
         leg.place(clamp(mapX(leg.x), 60, this.W - 60), clamp(mapY(leg.y), this.bandTop + 18, this.bandBot));
+        if (falling) {
+          // a released stomp keeps falling onto its (remapped) target
+          const [tx, ty] = this.aimPoint(falling.tx, falling.ty);
+          leg.tx = leg.hoverX = tx;
+          leg.ty = leg.hoverY = ty;
+          leg.state = 'stomping';
+          leg.t = falling.t;
+        }
       }
       this.cancelPointer();
     }
+  }
+
+  /** Safe-area insets in logical px, minus what the letterbox margin already covers. */
+  readInsets() {
+    const cs = getComputedStyle(this.insetProbe);
+    const px = (v) => parseFloat(v) || 0;
+    this.safe = {
+      t: Math.max(0, px(cs.paddingTop) - this.offY) / this.scale,
+      r: Math.max(0, px(cs.paddingRight) - this.offX) / this.scale,
+      b: Math.max(0, px(cs.paddingBottom) - this.offY) / this.scale,
+      l: Math.max(0, px(cs.paddingLeft) - this.offX) / this.scale,
+    };
   }
 
   placeLegs() {
@@ -144,6 +181,9 @@ class Game {
     this.comboT = 0;
     this.pressure = 0;
     this.gainT = 0;
+    this.redMix = 0;
+    this.moodT = 0;
+    this.portraitPulse = 0;
     this.lastLevel = 0;
     this.stepDelay = -1;
     this.fx.clear();
@@ -172,6 +212,7 @@ class Game {
   end() {
     this.cancelPointer();
     sfx.stopCharge();
+    this.settleLegs(true); // a stomp released before the end still counts
     this.finishCombo();
     this.records.check(this.session);
     this.records.save();
@@ -184,10 +225,22 @@ class Game {
     if (this.records.dirty) this.records.save();
     this.cancelPointer();
     sfx.stopCharge();
+    this.settleLegs(false);
     this.state = 'menu';
     this.pressure = 0;
     ui.refreshMenu(this);
     ui.show('menu');
+  }
+
+  /** Nothing may hang in mid-air once the round stops updating. */
+  settleLegs(score) {
+    const f = this.foot;
+    if (f.state === 'stomping') {
+      f.place(f.tx, f.ty);
+      if (score) this.impact();
+    }
+    const b = this.backLeg;
+    if (b.state === 'stepping') b.place(b.tx, b.ty);
   }
 
   saveSettings() {
@@ -293,6 +346,7 @@ class Game {
     if (p.mode === 'grind') {
       if (this.foot.state === 'grinding') this.foot.state = 'planted';
       this.pointer = null;
+      this.stepDelay = 0.1; // let the back leg clear a foot that was slid next to it
       return;
     }
     if (p.queued) {
@@ -321,10 +375,13 @@ class Game {
       }
     }
     this.pointer = null;
-    if (this.foot.state === 'grinding') this.foot.state = 'planted';
+    if (this.foot.state === 'grinding') {
+      this.foot.state = 'planted';
+      this.stepDelay = 0.1;
+    }
     if (this.foot.state === 'raising' || this.foot.state === 'hover') {
-      // put the foot back down without scoring (a released stomp still lands)
-      this.foot.place(this.foot.tx, this.foot.ty);
+      // put the foot back where it was lifted from, without scoring (a released stomp still lands)
+      this.foot.place(this.foot.fromX, this.foot.fromY);
     }
     this.pressure = 0;
     sfx.stopCharge();
@@ -492,6 +549,8 @@ class Game {
 
   // ------------------------------------------------------------------ loop
   frame(now) {
+    // re-arm first: an exception in this frame must not stop the loop for good
+    requestAnimationFrame((t) => this.frame(t));
     const dt = Math.min(0.05, Math.max(0, (now - this.last) / 1000));
     this.last = now;
     this.time += dt;
@@ -504,9 +563,11 @@ class Game {
       }
     } else if (this.state === 'menu') {
       this.ambient(dt);
+    } else {
+      // pause / results: let the portrait settle instead of freezing mid cross-fade
+      this.tickPortrait(dt);
     }
     this.render();
-    requestAnimationFrame((t) => this.frame(t));
   }
 
   /** Menu backdrop: ants keep walking, nothing scores. */
@@ -527,7 +588,7 @@ class Game {
     // full and for a moment after a big stomp
     this.moodT = Math.max(0, this.moodT - dt);
     const wantRed = (this.state === 'play' && this.pressure >= 1) || this.moodT > 0 ? 1 : 0;
-    this.redMix += clamp(wantRed - this.redMix, -dt * 3, dt * 5);
+    this.redMix += clamp(wantRed - this.redMix, -dt * 8, dt * 12);
   }
 
   update(dt) {
@@ -554,28 +615,14 @@ class Game {
 
     if (foot.update(dt, this.pressure) === 'landed') {
       this.impact();
-      if (ptr && ptr.queued) {
-        // a touch arrived while we were stomping: start the next one now
-        ptr.queued = false;
-        const [tx, ty] = this.aimPoint(ptr.x, ptr.y);
-        this.beginAim(tx, ty);
-        if (ptr.released) {
-          this.release();
-          this.pointer = null;
-        }
-      }
+      // a touch arrived while we were stomping: start it now
+      if (ptr && ptr.queued) this.startQueued(ptr);
     }
     if (foot.state === 'grinding' && ptr && ptr.mode === 'grind') {
       this.grind(dt, ptr);
     } else if (foot.state === 'planted' && ptr && ptr.mode === 'aim' && ptr.queued) {
       // queued touch landed on a grinding foot that has since been released
-      ptr.queued = false;
-      const [tx, ty] = this.aimPoint(ptr.x, ptr.y);
-      this.beginAim(tx, ty);
-      if (ptr.released) {
-        this.release();
-        this.pointer = null;
-      }
+      this.startQueued(ptr);
     }
 
     if (this.stepDelay > 0) {
@@ -595,6 +642,31 @@ class Game {
     this.records.update(dt);
 
     if (this.mode === 'timed' && this.elapsed >= this.timeLimit) this.end();
+  }
+
+  /** Start a press that waited for the previous stomp; a finger on the leg grinds, as a fresh press there would. */
+  startQueued(ptr) {
+    const foot = this.foot;
+    ptr.queued = false;
+    const hb = foot.hitBox();
+    if (ptr.x >= hb.x0 && ptr.x <= hb.x1 && ptr.y >= hb.y0 && ptr.y <= hb.y1) {
+      if (ptr.released) {
+        // a quick tap on the leg: same as a fresh tap there (a grind of no length)
+        this.pointer = null;
+        return;
+      }
+      ptr.mode = 'grind';
+      foot.state = 'grinding';
+      foot.grindT = 0;
+      this.grindX = ptr.x - foot.x;
+      return;
+    }
+    const [tx, ty] = this.aimPoint(ptr.x, ptr.y);
+    this.beginAim(tx, ty);
+    if (ptr.released) {
+      this.release();
+      this.pointer = null;
+    }
   }
 
   grind(dt, ptr) {
@@ -799,8 +871,30 @@ async function boot() {
   ui.game = game;
   window.__game = game; // handy for debugging in the console
 
+  // Results-card ghost clicks: a finger held through the end of a round lands
+  // its click on whatever button appeared under it. Ignore a pointer click
+  // whose press began before the card was shown (however long it was held),
+  // and any click in the first 450 ms (double taps on 结算本局).
+  // Use the event's own timestamp (when the finger landed), not the time the
+  // handler ran: if the main thread is busy as the round ends, a press made
+  // before the card appeared can be handled after it. Engines that report an
+  // epoch-based timeStamp fall back to performance.now().
+  const pressTime = (e) => {
+    const now = performance.now();
+    return e.timeStamp > 0 && e.timeStamp <= now ? e.timeStamp : now;
+  };
+  const downAt = new Map(); // pointerId -> time of its pointerdown
+  let lastDown = -Infinity;
+  document.addEventListener('pointerdown', (e) => {
+    lastDown = pressTime(e);
+    downAt.set(e.pointerId, lastDown);
+  }, true);
+  document.addEventListener('touchstart', (e) => { lastDown = pressTime(e); }, { capture: true, passive: true });
   document.addEventListener('click', (e) => {
-    if (e.target.closest?.('button') && ui.shownAt && performance.now() - ui.shownAt < 450) {
+    if (!e.target.closest?.('button') || !ui.shownAt) return;
+    const pressed = downAt.get(e.pointerId) ?? lastDown;
+    const stale = e.detail > 0 && pressed < ui.shownAt; // detail 0 = keyboard / programmatic
+    if (stale || performance.now() - ui.shownAt < 450) {
       e.stopPropagation();
       e.preventDefault();
     }
