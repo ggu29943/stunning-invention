@@ -186,8 +186,11 @@ def main():
     meta = {}
     previews = []
     for src, name in BOOTS.items():
-        rgb = np.asarray(Image.open(os.path.join(SRC, f"{src}.png")).convert("RGB"))
-        alpha = boot_mask(rgb)
+        im0 = Image.open(os.path.join(SRC, f"{src}.png"))
+        rgb = np.asarray(im0.convert("RGB"))
+        # hand-cut sources carry their own alpha; otherwise rebuild it
+        alpha = (np.asarray(im0.getchannel("A")).astype(float) / 255
+                 if im0.mode == "RGBA" else boot_mask(rgb))
         ys, xs = np.nonzero(alpha > 0.02)
         y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
         rgba = np.dstack([np.maximum(rgb, 5), (alpha * 255).astype(np.uint8)])[y0:y1, x0:x1]
@@ -201,10 +204,13 @@ def main():
         previews.append((name, im))
         print(name, m)
     for src, name in FACES.items():
-        rgb = np.asarray(Image.open(os.path.join(SRC, f"{src}.png")).convert("RGB"))
-        s = min(rgb.shape[0], rgb.shape[1])
-        rgb = rgb[:s, (rgb.shape[1] - s) // 2:(rgb.shape[1] - s) // 2 + s]
-        alpha = face_alpha(rgb)
+        im0 = Image.open(os.path.join(SRC, f"{src}.png"))
+        full = np.asarray(im0.convert("RGBA"))
+        s = min(full.shape[0], full.shape[1])
+        x0 = (full.shape[1] - s) // 2
+        rgb = np.ascontiguousarray(full[:s, x0:x0 + s, :3])
+        alpha = (full[:s, x0:x0 + s, 3].astype(float) / 255
+                 if im0.mode == "RGBA" else face_alpha(rgb))
         im = Image.fromarray(np.dstack([rgb, (alpha * 255).astype(np.uint8)]), "RGBA")
         im = im.resize((FACE_SIZE, FACE_SIZE), Image.LANCZOS)
         save_webp(np.asarray(im), os.path.join(OUT, f"{name}.webp"), quality=90)

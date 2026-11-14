@@ -423,7 +423,7 @@ class Game {
     if (heelKills) this.fx.text(fp.heelX, fp.heelY - 40, '鞋跟暴击!', { size: 15, color: '#7ef0ff', life: 0.9 });
 
     this.fx.ring(fp.x, fp.y, fp.rx * 1.1, fp.ry * 1.1, 'rgba(255,255,255,0.7)', 0.3);
-    this.fx.dust(fp.x, foot.y, p, foot.plantScale());
+    this.fx.dust(fp.x, foot.y, p, foot.soleAt() / 165);
     this.fx.shake(3 + 9 * p + Math.min(5, dead.length * 0.15), 0.18 + p * 0.2);
     sfx.stomp(p);
     sfx.crunch(dead.length);
@@ -455,7 +455,7 @@ class Game {
       this.records.check(this.session);
       this.checkLevel();
     }
-    this.fx.dust(fp.x, leg.y, 0.1, leg.plantScale() * 0.7);
+    this.fx.dust(fp.x, leg.y, 0.1, (leg.soleAt() / 165) * 0.7);
     this.fx.shake(2.5, 0.12);
     sfx.stomp(0.15);
     sfx.crunch(dead.length);
