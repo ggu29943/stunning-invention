@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>高跟踩蚂蚁</title>
+  <meta name="description" content="手机网页小游戏：按住蓄力，松手踩下，碾碎成群的蚂蚁。">
+  <meta name="theme-color" content="#120a24">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="踩蚂蚁">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game" aria-label="游戏画面"></canvas>
+
+  <section id="loading" class="overlay">
+    <div class="card">
+      <p id="load-msg">加载中…</p>
+      <div class="bar"><div id="load-bar"></div></div>
+    </div>
+  </section>
+
+  <section id="menu" class="overlay" hidden>
+    <div class="card">
+      <h1>高跟踩蚂蚁</h1>
+      <p class="sub">STOMP · CRUSH · REPEAT</p>
+      <ul class="howto">
+        <li><b>按住</b>屏幕抬脚蓄力，拖动瞄准</li>
+        <li><b>松手</b>踩下，蓄满压力范围更大</li>
+        <li><b>按住腿</b>（街道上方）原地碾压，左右拖动</li>
+        <li>踩惊慌的、受伤的蚂蚁，自尊加成更高</li>
+      </ul>
+      <div class="actions">
+        <button id="btn-timed" class="primary">60 秒挑战</button>
+        <button id="btn-endless" class="primary alt">无尽解压</button>
+      </div>
+      <div class="toggles">
+        <button id="btn-sound" aria-pressed="true">声音：开</button>
+        <button id="btn-vibrate" aria-pressed="true">震动：开</button>
+        <button id="btn-fs">全屏</button>
+      </div>
+      <p id="best" class="best"></p>
+      <p class="credit">角色与高跟鞋素材由原作者授权使用</p>
+    </div>
+  </section>
+
+  <section id="pause" class="overlay" hidden>
+    <div class="card small">
+      <h2>暂停</h2>
+      <div class="actions column">
+        <button id="btn-resume" class="primary">继续</button>
+        <button id="btn-finish">结算本局</button>
+        <button id="btn-restart">重新开始</button>
+        <button id="btn-menu">主菜单</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="over" class="overlay" hidden>
+    <div class="card">
+      <h2 id="over-title">结算</h2>
+      <dl id="stats" class="stats"></dl>
+      <div class="actions">
+        <button id="btn-again" class="primary">再来一局</button>
+        <button id="btn-menu2">主菜单</button>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,214 @@
+:root {
+  --bg: #07030b;
+  --card: rgba(24, 10, 34, 0.86);
+  --line: rgba(255, 170, 220, 0.28);
+  --text: #f6eaff;
+  --muted: #b9a3cc;
+  --pink: #ff4fa3;
+  --red: #ff2350;
+  --gold: #ffe14f;
+  --font: ui-monospace, "SF Mono", Menlo, Consolas, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  display: block;
+  touch-action: none;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: rgba(7, 3, 11, 0.45);
+  overflow-y: auto;
+  touch-action: pan-y;
+  z-index: 2;
+}
+
+.overlay[hidden] { display: none; }
+
+.card {
+  width: min(460px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 20px 20px 16px;
+  border: 2px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.35), 0 18px 60px rgba(255, 35, 80, 0.18);
+  text-align: center;
+}
+
+.card.small { width: min(300px, 100%); }
+
+h1, h2 {
+  margin: 0;
+  letter-spacing: 0.06em;
+  text-shadow: 3px 3px 0 #3a0a20, 0 0 18px rgba(255, 79, 163, 0.55);
+}
+
+h1 { font-size: clamp(28px, 7vw, 40px); color: #fff; }
+h2 { font-size: 26px; margin-bottom: 12px; }
+
+.sub {
+  margin: 4px 0 12px;
+  font-size: 12px;
+  letter-spacing: 0.3em;
+  color: var(--pink);
+}
+
+.howto {
+  list-style: none;
+  margin: 0 auto 14px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--muted);
+  text-align: left;
+  display: inline-block;
+}
+
+.howto b { color: var(--gold); font-weight: 800; }
+.howto li::before { content: "▸ "; color: var(--pink); }
+
+.actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.actions.column { flex-direction: column; }
+
+button {
+  font: inherit;
+  font-weight: 800;
+  font-size: 15px;
+  min-height: 46px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button:active { transform: translateY(1px) scale(0.98); }
+button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+button[hidden] { display: none; }
+
+button.primary {
+  flex: 1 1 140px;
+  border: none;
+  background: linear-gradient(180deg, #ff4f7a, #d8174a);
+  box-shadow: 0 4px 0 #6d0a26, 0 0 18px rgba(255, 35, 80, 0.4);
+  color: #fff;
+  font-size: 17px;
+}
+
+button.primary.alt {
+  background: linear-gradient(180deg, #a46bff, #6a2bd8);
+  box-shadow: 0 4px 0 #2e0d66, 0 0 18px rgba(140, 80, 255, 0.4);
+}
+
+.toggles {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.toggles button {
+  min-height: 40px;
+  font-size: 13px;
+  padding: 6px 12px;
+}
+
+.toggles button[aria-pressed="false"] { color: var(--muted); opacity: 0.75; }
+
+.best {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--gold);
+  min-height: 1em;
+}
+
+.credit {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  margin: 0 0 16px;
+  text-align: left;
+  font-size: 15px;
+}
+
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; text-align: right; font-weight: 800; }
+
+.stats .new {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--red);
+  color: #fff;
+  font-size: 11px;
+  vertical-align: 1px;
+}
+
+.bar {
+  width: 220px;
+  height: 8px;
+  margin: 10px auto 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+#load-bar {
+  width: 0;
+  height: 100%;
+  background: var(--pink);
+  transition: width 0.15s;
+}
+
+@media (max-height: 460px) {
+  .card { padding: 12px 16px 10px; }
+  h1 { font-size: 26px; }
+  .sub { margin: 2px 0 6px; }
+  .howto { font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
+  .toggles { margin-top: 8px; }
+  .stats { font-size: 13px; gap: 3px 14px; margin-bottom: 10px; }
+}
