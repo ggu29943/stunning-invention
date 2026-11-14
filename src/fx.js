@@ -1,6 +1,7 @@
 import { rand, clamp } from './util.js';
 
 const MAX_PARTICLES = 500;
+const DECAL_LAYER_TIME = 10; // s; three layers -> a squash mark is gone 20-30 s after it was made
 
 export class FX {
   constructor() {
@@ -10,20 +11,27 @@ export class FX {
     this.shakeT = 0;
     this.shakeAmp = 0;
     this.flash = 0;
-    this.decals = null;
-    this.decalFade = 0;
+    this.layers = [];
+    this.decals = null; // newest layer (marks are painted here)
   }
 
   resize(W, H, top, res = 2) {
     this.top = top;
     this.dw = W;
     this.dh = H - top;
-    const c = document.createElement('canvas');
-    c.width = Math.ceil(W * res);
-    c.height = Math.ceil((H - top) * res);
-    this.decals = c;
-    this.dctx = c.getContext('2d');
-    this.dctx.scale(res, res);
+    // Fading by repeated destination-out never reaches 0 in 8-bit alpha (a*0.88
+    // rounds back up below ~4/255), so marks live in three layers instead: the
+    // oldest fades out with globalAlpha and is cleared when it is reused.
+    this.layers = [0, 1, 2].map((i) => {
+      const c = document.createElement('canvas');
+      c.width = Math.ceil(W * res);
+      c.height = Math.ceil((H - top) * res);
+      const g = c.getContext('2d');
+      g.scale(res, res);
+      return { c, g, age: i * DECAL_LAYER_TIME };
+    });
+    this.decals = this.layers[0].c;
+    this.dctx = this.layers[0].g;
   }
 
   clear() {
@@ -32,7 +40,7 @@ export class FX {
     this.rings.length = 0;
     this.shakeT = 0;
     this.flash = 0;
-    this.dctx?.clearRect(0, 0, this.decals.width, this.decals.height);
+    for (const l of this.layers) l.g.clearRect(0, 0, this.dw, this.dh);
   }
 
   shake(amp, dur = 0.25) {
@@ -173,20 +181,29 @@ export class FX {
     for (const r of this.rings) r.age += dt;
     this.rings = this.rings.filter((r) => r.age < r.life);
 
-    // slowly wash the street clean
-    this.decalFade += dt;
-    if (this.decalFade > 2 && this.dctx) {
-      this.decalFade = 0;
-      const g = this.dctx;
-      g.globalCompositeOperation = 'destination-out';
-      g.fillStyle = 'rgba(0,0,0,0.12)';
-      g.fillRect(0, 0, this.decals.width, this.decals.height);
-      g.globalCompositeOperation = 'source-over';
+    // slowly wash the street clean: the oldest layer is reused for new marks
+    for (const l of this.layers) l.age += dt;
+    if (this.layers.length && this.layers[0].age >= DECAL_LAYER_TIME) {
+      const l = this.layers.pop();
+      l.g.clearRect(0, 0, this.dw, this.dh);
+      l.age = 0;
+      this.layers.unshift(l);
+      this.decals = l.c;
+      this.dctx = l.g;
     }
   }
 
   drawDecals(ctx) {
-    if (this.decals) ctx.drawImage(this.decals, 0, this.top, this.dw, this.dh);
+    // oldest first, so newer marks are drawn on top of fading ones
+    for (let i = this.layers.length - 1; i >= 0; i--) {
+      const l = this.layers[i];
+      // full strength for the first 10 s of the layer, gone by 30 s
+      const a = clamp(1 - (l.age - DECAL_LAYER_TIME) / (2 * DECAL_LAYER_TIME), 0, 1);
+      if (a <= 0) continue;
+      ctx.globalAlpha = a;
+      ctx.drawImage(l.c, 0, this.top, this.dw, this.dh);
+    }
+    ctx.globalAlpha = 1;
   }
 
   drawBack(ctx) {

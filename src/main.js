@@ -146,6 +146,19 @@ class Game {
           leg.t = falling.t;
         }
       }
+      // the gap between the feet was scaled with the width (a landscape -> portrait
+      // turn leaves the back leg half inside the front boot): restore the stance
+      const f = this.foot;
+      const b = this.backLeg;
+      const fx = f.state === 'stomping' ? f.tx : f.x;
+      const fy = f.state === 'stomping' ? f.ty : f.y;
+      const gap = Math.abs(b.x - fx);
+      if (b.state === 'planted' && (gap < this.soleLen * 0.7 || gap > Math.max(this.soleLen * 1.35, this.W * 0.32))) {
+        const side = b.x >= fx ? 1 : -1;
+        let tx = fx + side * this.soleLen * 0.95;
+        if (tx < 60 || tx > this.W - 60) tx = fx - side * this.soleLen * 0.95;
+        b.place(clamp(tx, 60, this.W - 60), clamp(fy - 30, this.bandTop + 16, this.bandBot - 10));
+      }
       this.cancelPointer();
     }
   }
@@ -836,7 +849,8 @@ const ui = {
       }
       list.append(dt, dd);
     }
-    $('over-title').textContent = g.mode === 'timed' ? '时间到！' : '结算';
+    // 结算本局 from the pause menu ends a 60 s round early: not "time's up"
+    $('over-title').textContent = g.mode === 'timed' && g.elapsed >= g.timeLimit ? '时间到！' : '结算';
   },
 };
 

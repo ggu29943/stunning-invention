@@ -281,9 +281,13 @@ export class Leg {
 function drawSprite(ctx, image, m, dx, dy, s, sy = 1) {
   const top = -40;
   const row = m.shaft[2];
-  const yRow = dy + row * s * sy;
-  if (yRow > top) ctx.drawImage(image, 0, row, m.w, 2, dx, top, m.w * s, yRow - top + 1);
-  ctx.drawImage(image, 0, row, m.w, m.h - row, dx, yRow, m.w * s, (m.h - row) * s * sy);
+  // Start the sprite two rows below the stretched row: filtering at a drawImage
+  // edge samples the source row above it, and the rows above `row` are the dark
+  // hand-cut outline (a 1 px dark seam line otherwise, most visible on the back leg).
+  const cut = row + 2;
+  const yCut = dy + cut * s * sy;
+  if (yCut > top) ctx.drawImage(image, 0, row, m.w, 2, dx, top, m.w * s, yCut - top + 1);
+  ctx.drawImage(image, 0, cut, m.w, m.h - cut, dx, yCut, m.w * s, (m.h - cut) * s * sy);
 }
 
 function drawPlanted(ctx, image, m, x, y, s, squashY) {

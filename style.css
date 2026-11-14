@@ -221,3 +221,15 @@ button.primary.alt {
   .sub, .credit { display: none; }
   .howto { margin-bottom: 6px; }
 }
+
+/* landscape phones with the browser toolbar showing (~260-320 px tall) */
+@media (max-height: 320px) {
+  .overlay { padding-top: max(6px, env(safe-area-inset-top)); padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+  .card { padding: 8px 14px 8px; }
+  h2 { font-size: 22px; margin-bottom: 6px; }
+  h1 { font-size: 22px; }
+  .howto { line-height: 1.4; }
+  .actions.column { gap: 6px; }
+  .actions.column > button { min-height: 40px; padding: 6px 12px; }
+  .stats { gap: 2px 12px; margin-bottom: 8px; }
+}
