@@ -17,6 +17,12 @@ const COMBO_WINDOW = 1.6;
 export const BACK_P1 = 0.35;
 export const KILL_AT = 0.7;
 const LIFT_HYST = 5; // px the sole must rise before a pressed boot counts as lifted
+// drag control: a pressed boot only starts to grind once the finger has
+// deliberately dragged sideways (finger wobble while pressing down is not a
+// grind); it keeps grinding while it travels and stops once it stays put
+const GRIND_START = 20; // px of sideways drag (about 14 CSS px on a phone)
+const GRIND_STEP = 2; // px of travel that keep a grind going ...
+const GRIND_HOLD = 0.25; // ... for this long (s)
 const PRESS_HINTS = 3; // show the "press down" hint on the first touchdowns of a round
 const STICK_CHANCE = 0.3; // drag control: chance a crushing press gets the sole sticky
 const MAX_STRANDS = 12;
@@ -68,6 +74,9 @@ class Game {
     this.killAt = KILL_AT;
     this.backP1 = BACK_P1;
     this.press = null; // drag control: the boot's current stay on the street
+    // drag control: sideways slide of a pressed boot (from = finger x it must
+    // leave by GRIND_START before a grind starts; ref = boot x at the last step)
+    this.slide = { on: false, from: 0, ref: 0 };
     // drag control: crushed ants glued between sole and street (strands) and
     // squashed onto the sole (smears)
     this.sticky = { strands: [], smears: [], anchorX: 0 };
@@ -788,18 +797,26 @@ class Game {
   }
 
   /**
-   * Which BACK_POSES pose the back leg shows. While the front boot grinds it
-   * has two: still (0), or heel raised once the grind is past the kill line
-   * (2: weight forward onto the grinding boot, toe still planted). While a
-   * dragged boot presses it has three (0..2).
+   * Which BACK_POSES pose the back leg shows. Pressing and grinding share the
+   * same three zones (either control): still (0), weight shifting forward
+   * from BACK_P1 (1), heel raised from the kill line on (2) -- the toe always
+   * stays planted.
    */
   backPose() {
     const f = this.foot;
-    if (this.isGrinding()) return this.pressure >= KILL_AT ? 2 : 0;
-    if (this.settings.control !== 'drag' || f.state !== 'follow' || f.h > 0.01) return 0;
+    const pressing = this.isGrinding() || (this.settings.control === 'drag' && f.state === 'follow' && f.h <= 0.01);
+    if (!pressing) return 0;
     if (this.pressure >= KILL_AT) return 2;
     if (this.pressure >= BACK_P1) return 1;
     return 0;
+  }
+
+  /** A pressed boot stops sliding; a new grind needs a fresh sideways drag from x. */
+  resetSlide(x) {
+    this.slide.on = false;
+    this.slide.from = x;
+    this.slide.ref = this.foot.x;
+    this.foot.grindingT = 0;
   }
 
   /** Where the finger wants the boot: x, sole height above the street, pressure. */
@@ -832,6 +849,7 @@ class Game {
     foot.follow();
     this.pressure = 0;
     this.press = foot.h <= 0.01 ? this.newPress() : null;
+    this.resetSlide(this.pointer ? clamp(this.pointer.x, 40, this.W - 40) : foot.x);
   }
 
   newPress() {
@@ -849,16 +867,28 @@ class Game {
     const wasDown = foot.h <= 0.01;
     const held = st.strands.length > 0;
     if (wasDown && t.h <= LIFT_HYST) {
-      // on the street (finger jitter near the kerb does not count as a lift):
-      // a pressed boot slides only slowly, never into the back leg; pressure follows
-      const maxStep = 140 * dt;
-      let nx = foot.x + clamp(t.x - foot.x, -maxStep, maxStep);
-      const b = this.backLeg;
-      const keep = this.soleLen * 0.75;
-      if (b.state === 'planted' && Math.abs(nx - b.x) < keep && Math.abs(nx - b.x) < Math.abs(foot.x - b.x)) nx = foot.x;
-      // sliding a pressed boot is a grind, like the stomp control's
-      if (Math.abs(nx - foot.x) > 0.3) foot.grindingT = 0.22;
-      foot.x = nx;
+      // on the street (finger jitter near the kerb does not count as a lift).
+      // The pressed boot stays put until the finger deliberately drags
+      // sideways; then it slides slowly after the finger -- a grind, like the
+      // stomp control's -- never into the back leg. Pressure follows the depth.
+      const sl = this.slide;
+      if (!sl.on && Math.abs(t.x - sl.from) >= GRIND_START) {
+        sl.on = true;
+        sl.ref = foot.x;
+        foot.grindingT = GRIND_HOLD;
+      }
+      if (sl.on) {
+        const maxStep = 140 * dt;
+        let nx = foot.x + clamp(t.x - foot.x, -maxStep, maxStep);
+        const b = this.backLeg;
+        const keep = this.soleLen * 0.75;
+        if (b.state === 'planted' && Math.abs(nx - b.x) < keep && Math.abs(nx - b.x) < Math.abs(foot.x - b.x)) nx = foot.x;
+        foot.x = nx;
+        if (Math.abs(foot.x - sl.ref) >= GRIND_STEP) {
+          foot.grindingT = GRIND_HOLD;
+          sl.ref = foot.x;
+        }
+      }
       foot.h = 0;
       this.pressure += (t.p - this.pressure) * Math.min(1, dt * 14);
       if (Math.abs(t.p - this.pressure) < 0.002) this.pressure = t.p;
@@ -884,13 +914,17 @@ class Game {
       if (isDown) this.endFollow();
       return;
     }
-    if (!wasDown && isDown) this.touchdown();
-    else if (wasDown && !isDown) this.liftoff();
+    if (!wasDown && isDown) {
+      this.touchdown();
+      this.resetSlide(t.x);
+    } else if (wasDown && !isDown) this.liftoff();
     if (!isDown) foot.grindingT = 0;
     if (foot.grindingT > 0) {
       foot.grindingT = Math.max(0, foot.grindingT - dt);
       foot.grindT += dt;
       s_grindFx(this, foot, dt);
+      // stood still for GRIND_HOLD: the grind is over
+      if (foot.grindingT <= 0) this.resetSlide(t.x);
     }
     if (isDown) this.pressing(dt);
   }

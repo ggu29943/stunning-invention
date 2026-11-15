@@ -22,10 +22,9 @@ export const CHARGE_TIME = 0.85;
 // (lift_0). The stomp control's charge raises the boot through the zones.
 const FOLLOW_SIDE = 6;
 export const ZONE_FRAMES = ['lift_2', 'lift_1', 'lift_0'];
-// The back leg shifts weight as the front boot presses down (drag control:
-// stand_1 -> twist_0 -> twist_1); while the front boot grinds it either stays
-// put or, past the kill line, raises its heel (twist_1) -- its toe always
-// stays planted, so she never stands on one foot.
+// The back leg shifts weight as the front boot presses down or grinds (both
+// share the same zones: stand_1 -> twist_0 -> twist_1 at the kill line); its
+// toe always stays planted, so she never stands on one foot.
 export const BACK_POSES = ['stand_1', 'twist_0', 'twist_1'];
 
 const LIFT_MULT = 1.32; // raised foot is closer to the camera
