@@ -57,9 +57,12 @@ function noiseBurst(t, dur, { type = 'lowpass', freq = 800, q = 0.7, gain = 0.5 
 }
 
 /**
- * A stiletto striking pavement: the heel tip's sharp click (with a short
- * metallic ring), the sole slapping down a beat later, a faint street echo,
- * and only a short low thump for weight. `power` (0..1) adds body.
+ * A heel striking the street. Modelled on measured recordings of real high
+ * heels on hard floors (nine CC0 strikes): the "哒" is a ~10 ms noise burst
+ * with a ~1 ms attack whose energy sits at 0.5-2 kHz (peak near 1 kHz, little
+ * below ~120 Hz, falling off above ~2 kHz) -- no tone and no sub thump; the
+ * street answers faintly; the sole touches down ~100 ms later, much weaker.
+ * `power` (0..1) adds a short low-mid body for a hard stomp.
  */
 export function stomp(power = 0.5) {
   if (!ready()) return;
@@ -72,42 +75,58 @@ export function heelTap(volume = 0.35) {
   heelStrike(ctx.currentTime, volume, 0);
 }
 
-function heelStrike(t, vol, power) {
-  // heel tip: broadband transient + a brief high ring
-  noiseBurst(t, 0.018, { type: 'highpass', freq: 2600, gain: 0.95 * vol });
-  const ring = ctx.createOscillator();
-  ring.type = 'triangle';
-  const f0 = 2900 + Math.random() * 700;
-  ring.frequency.setValueAtTime(f0, t);
-  ring.frequency.exponentialRampToValueAtTime(f0 * 0.92, t + 0.05);
-  const rg = ctx.createGain();
-  rg.gain.setValueAtTime(0.0001, t);
-  rg.gain.exponentialRampToValueAtTime(0.13 * vol, t + 0.002);
-  rg.gain.exponentialRampToValueAtTime(0.0005, t + 0.06);
-  ring.connect(rg).connect(master);
-  ring.start(t);
-  ring.stop(t + 0.08);
-  // sole slapping the street right after the heel
-  noiseBurst(t + 0.012, 0.045 + power * 0.03, { type: 'bandpass', freq: 1300 + power * 300, q: 1.1, gain: (0.32 + 0.2 * power) * vol });
-  // a short thump for weight (kept brief so it never sounds muffled)
-  const o = ctx.createOscillator();
-  o.type = 'sine';
-  o.frequency.setValueAtTime(115 + power * 35, t);
-  o.frequency.exponentialRampToValueAtTime(55, t + 0.09);
-  const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime((0.07 + 0.22 * power) * vol, t + 0.005);
-  g.gain.exponentialRampToValueAtTime(0.0005, t + 0.11 + power * 0.07);
-  o.connect(g).connect(master);
-  o.start(t);
-  o.stop(t + 0.22);
-  if (power >= 1) {
-    // full pressure: the street cracks
-    noiseBurst(t + 0.008, 0.09, { type: 'lowpass', freq: 900, gain: 0.3 * vol });
+/**
+ * Noise through a chain of biquads ([type, freq, Q, gain dB]) with a short
+ * linear attack and an exponential decay reaching -20 dB after `decay20`.
+ */
+function shapedBurst(t, { attack, decay20, gain, chain }) {
+  if (!(gain > 0)) return; // an exponential ramp cannot start from 0
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  src.playbackRate.value = 0.9 + Math.random() * 0.2;
+  let node = src;
+  for (const [type, freq, q, g] of chain) {
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    if (q !== undefined) f.Q.value = q;
+    if (g !== undefined) f.gain.value = g;
+    node.connect(f);
+    node = f;
   }
-  // the click echoing off the buildings
-  noiseBurst(t + 0.075, 0.012, { type: 'highpass', freq: 2800, gain: 0.12 * vol });
-  noiseBurst(t + 0.15, 0.01, { type: 'highpass', freq: 3000, gain: 0.05 * vol });
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.linearRampToValueAtTime(gain, t + attack);
+  env.gain.exponentialRampToValueAtTime(gain * 0.001, t + attack + decay20 * 3);
+  node.connect(env).connect(master);
+  src.start(t, Math.random() * 0.5, attack + decay20 * 3 + 0.01);
+}
+
+function heelStrike(t, vol, power) {
+  vol *= 0.84; // as loud (A-weighted) as the version it replaced
+  const v = 1 + (Math.random() - 0.5) * 0.08; // +-4%, so repeats differ
+  // the heel tip: the 哒 itself
+  shapedBurst(t, {
+    attack: 0.0004,
+    decay20: 0.013,
+    gain: 1.3 * vol,
+    chain: [['highpass', 130, 0.6], ['peaking', 380, 0.8, 3.5], ['peaking', 1000 * v, 1.0, 4], ['lowpass', 2300 * v, 0.7]],
+  });
+  // the street answering faintly (buildings either side): a soft, dark tail
+  shapedBurst(t + 0.004, { attack: 0.006, decay20: 0.06, gain: 0.08 * vol, chain: [['bandpass', 800, 0.8], ['lowpass', 2000, 0.7]] });
+  // a hard edge on the first millisecond (crisp, never a hiss tail)
+  shapedBurst(t, { attack: 0.0002, decay20: 0.001, gain: 0.16 * vol, chain: [['highpass', 2500, 0.7], ['lowpass', 5500, 0.7]] });
+  // weight for a hard stomp: a short low-mid body, no sub
+  if (power > 0) {
+    shapedBurst(t, { attack: 0.002, decay20: 0.02 + 0.015 * power, gain: 0.55 * power * vol, chain: [['bandpass', 260, 0.9]] });
+  }
+  // the sole touching down after the heel: faint, mid-band
+  shapedBurst(t + 0.095 + Math.random() * 0.02, {
+    attack: 0.001,
+    decay20: 0.005,
+    gain: 0.22 * vol,
+    chain: [['bandpass', 1400 * v, 1.4], ['lowpass', 3000, 0.7]],
+  });
 }
 
 export function crunch(count) {
