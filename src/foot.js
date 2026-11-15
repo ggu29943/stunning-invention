@@ -15,13 +15,14 @@ export const RAISE_TIME = 0.09;
 export const STOMP_TIME = 0.075;
 export const STEP_TIME = 0.26;
 export const CHARGE_TIME = 0.85;
-// drag control: below FOLLOW_SIDE px of height the boot is drawn side-on
-// (stand_0); above FOLLOW_SOLE px it shows its sole (lift_2); in between the
-// two drawings cross-fade
-// (switch quickly: the sticky strands hold the boot low, and the sole view
-// with its smears is what should show while they stretch)
+// drag control: the boot's pose is picked by height zone, as in the video.
+// On the street (below FOLLOW_SIDE px) it stands side-on (stand_0); in the
+// air the lowest third shows the sole angled down (lift_2), the middle third
+// the cocked-back red sole (lift_1), the top third the toe-down lift (lift_0).
 const FOLLOW_SIDE = 6;
-const FOLLOW_SOLE = 16;
+export const ZONE_FRAMES = ['lift_2', 'lift_1', 'lift_0'];
+// drag control: the back leg shifts weight as the front boot presses down
+export const BACK_POSES = ['stand_1', 'twist_0', 'twist_1'];
 
 const LIFT_MULT = 1.32; // raised foot is closer to the camera
 
@@ -44,6 +45,31 @@ export class Leg {
     this.grindT = 0;
     this.squash = 0;
     this.h = 0; // drag control: height of the sole above the street
+    this.zone = 0; // drag control: which ZONE_FRAMES pose is showing
+    this.hMax = 300; // drag control: tallest reachable height (sets the zones)
+  }
+
+  /** Drag control: pick the height zone, with a little hysteresis at each border. */
+  updateZone() {
+    const third = this.hMax / 3;
+    const raw = Math.max(0, Math.min(2, Math.floor(this.h / third)));
+    if (raw !== this.zone) {
+      const border = raw > this.zone ? third * raw : third * this.zone;
+      if (Math.abs(this.h - border) > 6 || Math.abs(raw - this.zone) > 1) this.zone = raw;
+    }
+  }
+
+  /** Drag control: sprite scale of the lifted pose (grows as it rises toward the camera). */
+  zoneScale(name) {
+    const lift = clamp((this.h - FOLLOW_SIDE) / (this.hMax * 0.6), 0, 1);
+    return this.frameScale(name, this.y) * lerp(1.02, LIFT_MULT, lift);
+  }
+
+  /** Drag control: where a lifted pose is drawn (foot centre at x, lowest point h above the street). */
+  zoneOrigin(name) {
+    const m = this.meta[name];
+    const s = this.zoneScale(name);
+    return { m, s, dx: this.x - m.footc[0] * s, dy: this.y - this.h - m.toe[2] * s };
   }
 
   get meta() {
@@ -157,13 +183,9 @@ export class Leg {
    */
   underside(frac) {
     const h = this.h;
-    if (this.state === 'follow' && h >= FOLLOW_SIDE) {
-      const m = this.meta.lift_2;
-      const lift = clamp((h - FOLLOW_SIDE) / (this.hoverHeight(0) * 0.9), 0, 1);
-      const s = this.frameScale('lift_2', this.y) * lerp(1.02, LIFT_MULT, lift);
-      const sy = this.y - h - (m.toe[2] - m.sole[1]) * s;
-      const dx = this.x - m.sole[0] * s;
-      const dy = sy - m.sole[1] * s;
+    const name = ZONE_FRAMES[this.zone];
+    if (this.state === 'follow' && h >= FOLLOW_SIDE && name !== 'lift_0') {
+      const { m, s, dx, dy } = this.zoneOrigin(name);
       let [ux, uy, a, b] = m.soleAxis;
       if (ux < 0) {
         ux = -ux;
@@ -268,38 +290,35 @@ export class Leg {
           wob = Math.sin(this.grindT * 40) * 2.5;
         }
         const s = this.frameScale(name);
+        if (this.back) {
+          // the back leg shifts its weight while the front boot presses (drag
+          // control); every pose keeps its toe tip planted on the same spot
+          const pose = BACK_POSES[this.game.backPose ? this.game.backPose() : 0];
+          const ref = meta.stand_1;
+          const tipX = this.x - ((ref.toe[0] + ref.heel[0]) / 2 - ref.toe[0]) * s;
+          const m = meta[pose];
+          const sy = 1 - this.squash * 0.035;
+          drawSprite(ctx, pick(pose), m, tipX - m.toe[0] * s, this.y - m.toe[2] * s * sy, s, sy);
+          break;
+        }
         drawPlanted(ctx, pick(name), meta[name], this.x + wob, this.y, s, 1 - this.squash * 0.035);
         break;
       }
       case 'follow': {
         const h = this.h;
-        const k = clamp((h - FOLLOW_SIDE) / (FOLLOW_SOLE - FOLLOW_SIDE), 0, 1);
-        // cross-fade without see-through: the outgoing drawing stays opaque
-        // until the incoming one is, then fades out
-        const aSide = k < 0.5 ? 1 : (1 - k) * 2;
-        const aSole = Math.min(1, k * 2);
-        if (aSide > 0) {
-          // side-on; on the street it compresses and trembles with pressure
+        if (h < FOLLOW_SIDE) {
+          // side-on on the street; it compresses and trembles with pressure
           const s = this.frameScale('stand_0');
           const onGround = h <= 0.01;
           const wob = onGround ? (Math.random() - 0.5) * pressure * pressure * 2.2 : 0;
           const squash = onGround ? 1 - pressure * 0.07 - this.squash * 0.035 : 1;
-          ctx.globalAlpha = aSide;
           drawPlanted(ctx, img.stand_0, meta.stand_0, this.x + wob, this.y - h, s, squash);
+        } else {
+          const name = ZONE_FRAMES[this.zone];
+          const { m, s, dx, dy } = this.zoneOrigin(name);
+          drawSprite(ctx, img[name], m, dx, dy, s);
+          if (name !== 'lift_0') drawSmears(ctx, this.game.sticky, m, dx, dy, s);
         }
-        if (aSole > 0) {
-          const m = meta.lift_2;
-          const lift = clamp((h - FOLLOW_SIDE) / (this.hoverHeight(0) * 0.9), 0, 1);
-          const s = this.frameScale('lift_2', this.y) * lerp(1.02, LIFT_MULT, lift);
-          // the lowest point of the frame (toe[2]) sits h above the street
-          const sy = this.y - h - (m.toe[2] - m.sole[1]) * s;
-          const dx = this.x - m.sole[0] * s;
-          const dy = sy - m.sole[1] * s;
-          ctx.globalAlpha = aSole;
-          drawSprite(ctx, img.lift_2, m, dx, dy, s);
-          drawSmears(ctx, this.game.sticky, m, dx, dy, s);
-        }
-        ctx.globalAlpha = 1;
         break;
       }
       case 'stepping': {

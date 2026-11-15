@@ -146,7 +146,10 @@ export function drawHUD(ctx, g, assets) {
     ctx.fillRect(gx, gy0 + gh * (1 - p), 6, gh * p);
   }
   if (g.settings.control === 'drag') {
-    // drag control: ants pinned under the boot die when the bar passes this line
+    // drag control: a tick where the back leg shifts its weight, and the
+    // line where ants pinned under the boot die
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.fillRect(gx - 2, gy0 + gh * (1 - g.backP1) - 1, 10, 2);
     const ky = gy0 + gh * (1 - g.killAt);
     const crushed = g.press && g.press.crushed;
     ctx.fillStyle = crushed ? '#ffe14f' : '#ffffff';

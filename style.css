@@ -248,3 +248,19 @@ button.primary.alt {
   .howto { font-size: 13px; line-height: 1.6; }
   .toggles { margin-top: 10px; }
 }
+
+/* very narrow screens (< 300 px): keep results rows on one line */
+@media (max-width: 300px) {
+  .stats { font-size: 12px; gap: 4px 8px; }
+  .stats .new { font-size: 0; padding: 0 4px; }
+  .stats .new::after { content: "★"; font-size: 11px; }
+  .howto { font-size: 12px; }
+}
+
+/* short landscape screens: the settings row (up to five buttons with the
+   drag control's 粘鞋 switch) stays on one line */
+@media (max-height: 460px) and (orientation: landscape) {
+  #menu .card { width: min(540px, 100%); }
+  .toggles { flex-wrap: nowrap; gap: 6px; }
+  .toggles button { font-size: 12px; padding: 4px 9px; min-height: 40px; white-space: nowrap; }
+}

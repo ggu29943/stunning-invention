@@ -178,7 +178,14 @@ def boot_points(alpha, rgb):
             xs = np.nonzero(alpha[r] > 0.5)[0]
             shaft = [int(xs.min()), int(xs.max()), r]
             break
-    return {"toe": toe, "heel": heel, "sole": sole, "soleAxis": sole_axis, "shaft": shaft, "bbox": [x0, x1]}
+    # centre of the foot part (bottom 35% of the silhouette): drag control
+    # anchors every lifted pose here so switching poses never jumps sideways
+    rows = np.nonzero(a.any(axis=1))[0]
+    low = a.copy()
+    low[: int(rows.max() - (rows.max() - rows.min()) * 0.35)] = False
+    fy, fx = np.nonzero(low)
+    footc = [int(fx.mean()), int(fy.mean())]
+    return {"toe": toe, "heel": heel, "sole": sole, "soleAxis": sole_axis, "footc": footc, "shaft": shaft, "bbox": [x0, x1]}
 
 
 def face_alpha(rgb):

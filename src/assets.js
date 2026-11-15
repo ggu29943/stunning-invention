@@ -1,8 +1,8 @@
 // High-resolution sprites cut by tools/extract_hd.py.
 const DIR = 'assets/sprites/hd';
-const SPRITES = ['stand_0', 'stand_1', 'twist_0', 'lift_0', 'lift_1', 'lift_2', 'face_green', 'face_red'];
+const SPRITES = ['stand_0', 'stand_1', 'twist_0', 'twist_1', 'lift_0', 'lift_1', 'lift_2', 'face_green', 'face_red'];
 // pre-tinted copies for the leg that stands further back in the scene
-const DARK = ['stand_1', 'lift_0'];
+const DARK = ['stand_1', 'twist_0', 'twist_1', 'lift_0'];
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
