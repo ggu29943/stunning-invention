@@ -145,6 +145,17 @@ export function drawHUD(ctx, g, assets) {
     ctx.fillStyle = full ? (Math.floor(g.time * 14) % 2 ? '#fff' : '#ff2350') : grad;
     ctx.fillRect(gx, gy0 + gh * (1 - p), 6, gh * p);
   }
+  if (g.settings.control === 'drag') {
+    // drag control: ants pinned under the boot die when the bar passes this line
+    const ky = gy0 + gh * (1 - g.killAt);
+    const crushed = g.press && g.press.crushed;
+    ctx.fillStyle = crushed ? '#ffe14f' : '#ffffff';
+    ctx.fillRect(gx - 4, ky - 1, 14, 2);
+    ctx.font = `800 10px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    shadowText(ctx, '致死', gx + 13, ky, crushed ? '#ffe14f' : '#ffffff');
+  }
   ctx.save();
   ctx.translate(gx + 3, gy0 + gh + 8);
   ctx.rotate(-Math.PI / 2);
@@ -192,8 +203,10 @@ function drawPortrait(ctx, g, assets) {
   const bounce = 1 + g.portraitPulse * 0.08;
   const x = g.W - fw - 12;
   const y = 12;
+  // gentle idle float (the ego circles below stay put)
+  const float = Math.sin(g.time * 1.9) * 2.5;
   ctx.save();
-  ctx.translate(x + fw / 2, y + fh / 2);
+  ctx.translate(x + fw / 2, y + fh / 2 + float);
   ctx.scale(bounce, bounce);
   ctx.translate(-fw / 2, -fh / 2);
   if (g.portraitPulse > 0) ctx.translate((Math.random() - 0.5) * 4 * g.portraitPulse, 0);
@@ -239,7 +252,7 @@ function drawPortrait(ctx, g, assets) {
   const lv = egoLevel(g.session.ego);
   const cr = 6.5 * sc + 0.8;
   const gap = (fw - 12) / 6;
-  const cy = y + fh + 13;
+  const cy = y + fh + 16; // clear of the floating, bouncing portrait
   for (let i = 0; i < 6; i++) {
     const cx = x + 6 + gap * (i + 0.5);
     const lo = i === 0 ? 0 : EGO_LEVELS[i - 1];

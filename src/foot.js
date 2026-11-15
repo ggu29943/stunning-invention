@@ -1,5 +1,7 @@
 import { clamp, lerp, easeInQuad, easeOutCubic } from './util.js';
 
+const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
 // Sprites come from assets/sprites/hd (see tools/extract_hd.py). Each frame has
 // landmarks in sprite pixels: toe [x0, x1, groundY], heel [x, y] (stiletto
 // tip), sole [x, y] (centre of the red sole), shaft [x0, x1, row] (leg width
@@ -15,6 +17,7 @@ export const RAISE_TIME = 0.09;
 export const STOMP_TIME = 0.075;
 export const STEP_TIME = 0.26;
 export const CHARGE_TIME = 0.85;
+export const LOWER_TIME = 0.26; // drag control: the boot is set down gently
 
 const LIFT_MULT = 1.32; // raised foot is closer to the camera
 
@@ -131,6 +134,14 @@ export class Leg {
     return true;
   }
 
+  /** Drag control: set the raised boot down gently (no impact). */
+  lower() {
+    if (this.state !== 'hover' && this.state !== 'raising') return false;
+    this.state = 'lowering';
+    this.t = 0;
+    return true;
+  }
+
   stepTo(x, y) {
     this.fromX = this.x;
     this.fromY = this.y;
@@ -140,7 +151,10 @@ export class Leg {
     this.t = 0;
   }
 
-  /** Returns 'landed' on the frame a stomp or step touches the ground. */
+  /**
+   * Returns 'landed' on the frame a stomp or step touches the ground, and
+   * 'placed' when a gently lowered boot reaches it (it is then 'pressing').
+   */
   update(dt) {
     this.t += dt;
     if (this.squash > 0) this.squash = Math.max(0, this.squash - dt * 6);
@@ -174,6 +188,23 @@ export class Leg {
         }
         break;
       }
+      case 'lowering': {
+        const k = Math.min(1, dt * 20);
+        this.hoverX = lerp(this.hoverX, this.tx, k);
+        this.hoverY = lerp(this.hoverY, this.ty, k);
+        if (this.t >= LOWER_TIME) {
+          this.x = this.tx;
+          this.y = this.ty;
+          this.state = 'pressing';
+          this.grindT = 0;
+          this.squash = 0.25;
+          return 'placed';
+        }
+        break;
+      }
+      case 'pressing':
+        this.grindT += dt;
+        break;
       case 'stepping': {
         if (this.t >= STEP_TIME) {
           this.x = this.tx;
@@ -200,7 +231,7 @@ export class Leg {
   }
 
   isAirborne() {
-    return this.state === 'raising' || this.state === 'hover' || this.state === 'stomping';
+    return this.state === 'raising' || this.state === 'hover' || this.state === 'stomping' || this.state === 'lowering';
   }
 
   draw(ctx, assets, pressure) {
@@ -218,6 +249,16 @@ export class Leg {
         }
         const s = this.frameScale(name);
         drawPlanted(ctx, pick(name), meta[name], this.x + wob, this.y, s, 1 - this.squash * 0.035);
+        break;
+      }
+      case 'pressing': {
+        // planted and pushing down: the boot compresses toward the street and
+        // trembles more as the pressure rises
+        const s = this.frameScale('stand_0');
+        const shake = pressure * pressure * 2.2;
+        const wob = (Math.random() - 0.5) * shake;
+        const squash = 1 - pressure * 0.07 - this.squash * 0.035;
+        drawPlanted(ctx, img.stand_0, meta.stand_0, this.x + wob, this.y, s, squash);
         break;
       }
       case 'stepping': {
@@ -243,10 +284,12 @@ export class Leg {
       }
       case 'raising':
       case 'hover':
-      case 'stomping': {
+      case 'stomping':
+      case 'lowering': {
         let lift = 1;
         if (this.state === 'raising') lift = easeOutCubic(clamp(this.t / RAISE_TIME, 0, 1));
         if (this.state === 'stomping') lift = 1 - easeInQuad(clamp(this.t / STOMP_TIME, 0, 1));
+        if (this.state === 'lowering') lift = 1 - easeInOut(clamp(this.t / LOWER_TIME, 0, 1));
         const name = pressure >= 0.6 ? 'lift_1' : 'lift_2';
         const m = meta[name];
         const sGround = this.frameScale(name, this.hoverY);

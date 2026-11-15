@@ -29,12 +29,7 @@
     <div class="card">
       <h1>高跟踩蚂蚁</h1>
       <p class="sub">STOMP · CRUSH · REPEAT</p>
-      <ul class="howto">
-        <li><b>按住</b>屏幕抬脚蓄力，拖动瞄准</li>
-        <li><b>松手</b>踩下，蓄满压力范围更大</li>
-        <li><b>按住腿</b>（街道上方）原地碾压，左右拖动</li>
-        <li>踩惊慌的、受伤的蚂蚁，自尊加成更高</li>
-      </ul>
+      <ul class="howto" id="howto"></ul>
       <div class="actions">
         <button id="btn-timed" class="primary">60 秒挑战</button>
         <button id="btn-endless" class="primary alt">无尽解压</button>
@@ -42,6 +37,7 @@
       <div class="toggles">
         <button id="btn-sound" aria-pressed="true">声音：开</button>
         <button id="btn-vibrate" aria-pressed="true">震动：开</button>
+        <button id="btn-control">操控：蓄力踩</button>
         <button id="btn-fs">全屏</button>
       </div>
       <p id="best" class="best"></p>
@@ -54,6 +50,7 @@
       <h2>暂停</h2>
       <div class="actions column">
         <button id="btn-resume" class="primary">继续</button>
+        <button id="btn-control2">操控：蓄力踩</button>
         <button id="btn-finish">结算本局</button>
         <button id="btn-restart">重新开始</button>
         <button id="btn-menu">主菜单</button>

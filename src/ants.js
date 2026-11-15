@@ -80,9 +80,16 @@ export class Swarm {
     const bot = g.bandBot - 2;
     const out = [];
     for (const a of this.ants) {
-      a.phase += dt * (a.state === 'panic' ? 26 : a.wounded ? 5 : 14);
+      a.phase += dt * (a.state === 'panic' || a.state === 'trapped' ? 26 : a.wounded ? 5 : 14);
       if (a.scream > 0) a.scream -= dt;
 
+      if (a.state === 'trapped') {
+        // pinned under a boot that was set down gently (drag control): it
+        // cannot move and keeps screaming until crushed or released
+        a.scream = Math.max(a.scream, 0.6);
+        if (Math.random() < dt * 1.5) sfx.squeak();
+        continue;
+      }
       if (a.state === 'stun') {
         a.stunT -= dt;
         if (a.stunT <= 0) this.panic(a, a.x - a.dir * 50, a.y, false);
@@ -141,6 +148,14 @@ export class Swarm {
     a.dir = a.vx >= 0 ? 1 : -1;
   }
 
+  /** Let a pinned ant go: it bolts away from the boot, maybe hurt. */
+  release(a, fromX, fromY, hurt) {
+    if (a.state !== 'trapped') return;
+    a.state = 'walk';
+    if (hurt) a.wounded = true;
+    this.panic(a, fromX, fromY, true);
+  }
+
   stun(a, dur) {
     a.state = 'stun';
     a.stunT = dur;
@@ -185,11 +200,20 @@ export function drawAnt(ctx, g, a) {
     ctx.translate(0, -3);
     ctx.scale(1, -1);
     ctx.translate(0, 3);
+  } else if (a.state === 'trapped') {
+    // squashed flatter the harder the boot presses, and wriggling
+    ctx.scale(1 + g.pressure * 0.25, 1 - g.pressure * 0.45);
+    ctx.rotate(Math.sin(a.phase * 1.7) * 0.2);
   } else if (a.wounded) {
     ctx.rotate(Math.sin(a.phase * 2) * 0.12);
   }
 
   const body = a.wounded ? '#3d0c16' : '#0a0610';
+  if (a.state === 'trapped') {
+    // pinned against a black sole: a light glow keeps the ant readable
+    ctx.shadowColor = 'rgba(255, 235, 245, 0.95)';
+    ctx.shadowBlur = 3;
+  }
   const swing = Math.sin(a.phase);
   // legs
   ctx.strokeStyle = body;
@@ -199,7 +223,7 @@ export function drawAnt(ctx, g, a) {
   for (let i = 0; i < 3; i++) {
     const bx = 2.2 - i * 1.6;
     const ph = i % 2 === 0 ? swing : -swing;
-    const reach = flip ? Math.sin(a.phase * 3 + i) * 2 : ph * 1.8;
+    const reach = flip || a.state === 'trapped' ? Math.sin(a.phase * 3 + i) * 2 : ph * 1.8;
     if (!(a.wounded && i === 1)) {
       ctx.moveTo(bx, -2.4);
       ctx.lineTo(bx + 1.2 + reach, -1.2);
@@ -252,11 +276,12 @@ export function drawAnt(ctx, g, a) {
 
   if (a.scream > 0 || a.state === 'stun') {
     // speech bubble above the ant (not flipped)
-    const by = a.y - 13 * s;
+    const trapped = a.state === 'trapped';
+    const by = a.y - 13 * s - (trapped ? 4 + Math.abs(Math.sin(a.phase * 0.9)) * 3 : 0);
     ctx.save();
     ctx.globalAlpha = a.state === 'stun' ? 0.9 : clamp(a.scream * 2, 0, 1);
     ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.round(9 * s)}px ui-monospace, Menlo, monospace`;
+    ctx.font = `bold ${Math.round((trapped ? 12 : 9) * s)}px ui-monospace, Menlo, monospace`;
     ctx.textAlign = 'center';
     ctx.fillStyle = a.state === 'stun' ? '#ffe14f' : '#ff3b5c';
     ctx.fillText(a.state === 'stun' ? '@' : '!', a.x, by);

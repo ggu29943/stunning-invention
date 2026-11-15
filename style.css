@@ -233,3 +233,18 @@ button.primary.alt {
   .actions.column > button { min-height: 40px; padding: 6px 12px; }
   .stats { gap: 2px 12px; margin-bottom: 8px; }
 }
+
+/* short landscape screens: the pause menu's five buttons go in two columns */
+@media (max-height: 460px) {
+  #pause .card { width: min(440px, 100%); }
+  #pause .actions.column { display: grid; grid-template-columns: 1fr 1fr; }
+  #pause .actions.column > .primary { grid-column: 1 / -1; }
+}
+
+/* narrow portrait phones (e.g. 320 px wide): the four setting buttons wrap
+   to two rows, so tighten the card a little */
+@media (max-width: 360px) {
+  .card { padding: 14px 14px 12px; }
+  .howto { font-size: 13px; line-height: 1.6; }
+  .toggles { margin-top: 10px; }
+}
