@@ -17,6 +17,13 @@ const COMBO_WINDOW = 1.6;
 export const BACK_P1 = 0.35;
 export const KILL_AT = 0.7;
 const LIFT_HYST = 5; // px the sole must rise before a pressed boot counts as lifted
+// Landscape: the street is far wider than a stride, so the legs must not end
+// up in a split. A raised foot reaches at most SPREAD_MAX sole lengths from
+// the standing one, and the back leg catches up (steps beside the front boot)
+// once the feet are more than STANCE_MAX sole lengths apart. Portrait is narrow
+// enough that this never comes up, so it is left as it was.
+const SPREAD_MAX = 2.4;
+const STANCE_MAX = 1.35;
 // drag control: a pressed boot only starts to grind once the finger has
 // deliberately dragged sideways (finger wobble while pressing down is not a
 // grind); it keeps grinding while it travels and stops once it stays put
@@ -73,6 +80,7 @@ class Game {
     this.pointer = null; // { id, x, y, mode: 'aim' | 'follow' | 'grind', queued, released }
     this.killAt = KILL_AT;
     this.backP1 = BACK_P1;
+    this.spreadMax = SPREAD_MAX;
     this.press = null; // drag control: the boot's current stay on the street
     // drag control: sideways slide of a pressed boot (from = finger x it must
     // leave by GRIND_START before a grind starts; ref = boot x at the last step)
@@ -187,7 +195,7 @@ class Game {
       const fx = f.state === 'stomping' ? f.tx : f.x;
       const fy = f.state === 'stomping' ? f.ty : f.y;
       const gap = Math.abs(b.x - fx);
-      if (b.state === 'planted' && (gap < this.soleLen * 0.7 || gap > Math.max(this.soleLen * 1.35, this.W * 0.32))) {
+      if (b.state === 'planted' && (gap < this.soleLen * 0.7 || gap > this.soleLen * STANCE_MAX)) {
         const side = b.x >= fx ? 1 : -1;
         let tx = fx + side * this.soleLen * 0.95;
         if (tx < 60 || tx > this.W - 60) tx = fx - side * this.soleLen * 0.95;
@@ -323,7 +331,24 @@ class Game {
   }
 
   aimPoint(x, y) {
-    return [clamp(x, 40, this.W - 40), clamp(y, this.bandTop + 18, this.bandBot)];
+    return [this.reachX(x), clamp(y, this.bandTop + 18, this.bandBot)];
+  }
+
+  /**
+   * Where a raised (or sliding) front foot may go along the street: inside
+   * the screen and, in landscape, within a stride of the standing back leg.
+   */
+  reachX(x) {
+    let lo = 40;
+    let hi = this.W - 40;
+    if (!this.portrait) {
+      const b = this.backLeg;
+      const bx = b.state === 'stepping' ? b.tx : b.x;
+      const r = this.soleLen * this.spreadMax;
+      lo = Math.max(lo, bx - r);
+      hi = Math.min(hi, bx + r);
+    }
+    return clamp(x, lo, hi);
   }
 
   bindInput() {
@@ -604,7 +629,7 @@ class Game {
     const f = this.foot;
     const b = this.backLeg;
     const gap = b.x - f.x;
-    const far = Math.abs(gap) > Math.max(this.soleLen * 1.35, this.W * 0.32);
+    const far = Math.abs(gap) > this.soleLen * STANCE_MAX;
     const close = Math.abs(gap) < this.soleLen * 0.7;
     if (!far && !close) return;
     let side = gap >= 0 ? 1 : -1;
@@ -819,17 +844,32 @@ class Game {
     this.foot.grindingT = 0;
   }
 
+  /**
+   * Drag control's finger mapping (world units). The finger holds the leg
+   * `grip` above the sole. Full pressure is reached at fullY, well clear of
+   * the bottom edge (a swipe up from there can leave the browser): at most
+   * 80% of the way down and at least 80 CSS px (plus the safe area) above the
+   * edge. The press travel from touchdown to full is about 80 CSS px.
+   */
+  pressMap() {
+    const css = 1 / this.scale; // world units per CSS px
+    const contact = this.dragY();
+    const fullY = Math.min(this.H * 0.8, this.H - 80 * css - this.safe.b);
+    const range = clamp(80 * css, 55, 110);
+    const grip = Math.max(this.soleLen * 0.25, contact - (fullY - range));
+    return { contact, grip, range };
+  }
+
   /** Where the finger wants the boot: x, sole height above the street, pressure. */
   followTargets(ptr) {
-    const grip = this.soleLen * 0.25;
-    const contact = this.dragY();
+    const { contact, grip, range } = this.pressMap();
     const sole = ptr.y + grip;
-    // full pressure is always reachable: the travel left below the touchdown
-    // point, capped to a comfortable range
-    const range = clamp(this.H - (contact - grip) - 10, 40, 110);
     const h = contact - sole;
     return {
-      x: clamp(ptr.x, 40, this.W - 40),
+      x: this.reachX(ptr.x),
+      // the finger itself (a grind starts, and the back leg steps around,
+      // from where the finger really is, not from the stride-limited x)
+      fx: clamp(ptr.x, 40, this.W - 40),
       // within half a pixel counts as on the street (float noise must not
       // leave the boot hovering a hair above it)
       h: h < 0.5 ? 0 : h,
@@ -860,7 +900,7 @@ class Game {
     const foot = this.foot;
     const st = this.sticky;
     const steering = ptr && ptr.mode === 'follow' && !ptr.queued;
-    const t = steering ? this.followTargets(ptr) : { x: foot.x, h: 0, p: 0 };
+    const t = steering ? this.followTargets(ptr) : { x: foot.x, fx: foot.x, h: 0, p: 0 };
     // tallest pose: the boot's lowest point no higher than ~42% of the screen
     // (as in the video, the raised boot stays in view); the zones split it in thirds
     foot.hMax = foot.hMaxAt(this.dragY());
@@ -872,7 +912,7 @@ class Game {
       // sideways; then it slides slowly after the finger -- a grind, like the
       // stomp control's -- never into the back leg. Pressure follows the depth.
       const sl = this.slide;
-      if (!sl.on && Math.abs(t.x - sl.from) >= GRIND_START) {
+      if (!sl.on && Math.abs(t.fx - sl.from) >= GRIND_START) {
         sl.on = true;
         sl.ref = foot.x;
         foot.grindingT = GRIND_HOLD;
@@ -882,7 +922,12 @@ class Game {
         let nx = foot.x + clamp(t.x - foot.x, -maxStep, maxStep);
         const b = this.backLeg;
         const keep = this.soleLen * 0.75;
-        if (b.state === 'planted' && Math.abs(nx - b.x) < keep && Math.abs(nx - b.x) < Math.abs(foot.x - b.x)) nx = foot.x;
+        if (b.state === 'planted' && Math.abs(nx - b.x) < keep && Math.abs(nx - b.x) < Math.abs(foot.x - b.x)) {
+          // sliding into the back leg: if the finger is past it, the back leg
+          // steps around to the other side (the pressed boot carries the
+          // weight) and the slide goes on; otherwise the boot stops beside it
+          if (!this.stepAround(t.fx)) nx = foot.x;
+        }
         foot.x = nx;
         if (Math.abs(foot.x - sl.ref) >= GRIND_STEP) {
           foot.grindingT = GRIND_HOLD;
@@ -916,7 +961,7 @@ class Game {
     }
     if (!wasDown && isDown) {
       this.touchdown();
-      this.resetSlide(t.x);
+      this.resetSlide(t.fx);
     } else if (wasDown && !isDown) this.liftoff();
     if (!isDown) foot.grindingT = 0;
     if (foot.grindingT > 0) {
@@ -924,9 +969,25 @@ class Game {
       foot.grindT += dt;
       s_grindFx(this, foot, dt);
       // stood still for GRIND_HOLD: the grind is over
-      if (foot.grindingT <= 0) this.resetSlide(t.x);
+      if (foot.grindingT <= 0) this.resetSlide(t.fx);
     }
     if (isDown) this.pressing(dt);
+  }
+
+  /**
+   * Drag control: the pressed boot is being pushed past the back leg toward
+   * targetX. If the finger really is past it, the back leg steps around to
+   * the other side of the front boot. Returns whether it did.
+   */
+  stepAround(targetX) {
+    const f = this.foot;
+    const b = this.backLeg;
+    const side = b.x >= f.x ? 1 : -1; // the back leg's side now
+    if ((targetX - b.x) * side < this.soleLen * 0.2) return false; // finger not past it
+    const tx = clamp(f.x - side * this.soleLen * 0.95, 60, this.W - 60);
+    if (Math.abs(tx - f.x) < this.soleLen * 0.7) return false; // no room on the other side
+    b.stepTo(tx, clamp(f.y - 30, this.bandTop + 16, this.bandBot - 10));
+    return true;
   }
 
   /** The dragged boot reached the street: ants under it are pinned, alive. */
@@ -936,8 +997,11 @@ class Game {
     this.session.stomps++;
     // the back leg stays put while the boot presses (it is shifting its
     // weight); it only hops aside if the boot came down right on top of it
+    // (landscape: a back leg left far behind steps up beside it, so moving
+    // across the wide street is walking, not a split)
     const b = this.backLeg;
-    if (b.state === 'planted' && Math.abs(b.x - foot.x) < this.soleLen * 0.7) this.maybeStepBackLeg();
+    const gap = Math.abs(b.x - foot.x);
+    if (b.state === 'planted' && (gap < this.soleLen * 0.7 || (!this.portrait && gap > this.soleLen * STANCE_MAX))) this.maybeStepBackLeg();
     sfx.heelTap(0.3);
     this.vibrate(8);
     this.fx.dust(foot.x, foot.y, 0, (foot.soleAt() / 165) * 0.5);
@@ -1278,7 +1342,7 @@ class Game {
     const s = this.session;
     s.crush += dt;
     // drag the planted heel slowly toward the finger
-    const want = clamp(ptr.x - this.grindX, 50, this.W - 50);
+    const want = this.reachX(clamp(ptr.x - this.grindX, 50, this.W - 50));
     const maxStep = 140 * dt;
     foot.x += clamp(want - foot.x, -maxStep, maxStep);
     const fp = foot.footprint(foot.x, foot.y, 0);
