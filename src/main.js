@@ -18,11 +18,12 @@ export const BACK_P1 = 0.35;
 export const KILL_AT = 0.7;
 const LIFT_HYST = 5; // px the sole must rise before a pressed boot counts as lifted
 // Landscape: the street is far wider than a stride, so the legs must not end
-// up in a split. A raised foot reaches at most SPREAD_MAX sole lengths from
-// the standing one, and the back leg catches up (steps beside the front boot)
-// once the feet are more than STANCE_MAX sole lengths apart. Portrait is narrow
-// enough that this never comes up, so it is left as it was.
-const SPREAD_MAX = 2.4;
+// up in a split. With the 跨度限制 setting on, a raised foot reaches at most
+// SPREAD_MAX sole lengths from the standing one (3.5: an iPad's whole street
+// is still in reach); either way the back leg catches up (steps beside the
+// front boot) once the feet are more than STANCE_MAX sole lengths apart.
+// Portrait is narrow enough that this never comes up, so it is left as it was.
+const SPREAD_MAX = 3.5;
 const STANCE_MAX = 1.35;
 // drag control: a pressed boot only starts to grind once the finger has
 // deliberately dragged sideways (finger wobble while pressing down is not a
@@ -42,9 +43,10 @@ class Game {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.assets = assets;
-    this.settings = { sound: true, vibrate: true, control: 'charge', sticky: true, skin: 'boots', ...store.get(SETTINGS_KEY, {}) };
+    this.settings = { sound: true, vibrate: true, control: 'charge', sticky: true, skin: 'boots', spreadLimit: true, ...store.get(SETTINGS_KEY, {}) };
     if (!SKINS[this.settings.skin]) this.settings.skin = 'boots';
     this.settings.sticky = this.settings.sticky !== false;
+    this.settings.spreadLimit = this.settings.spreadLimit !== false;
     this.stickChance = STICK_CHANCE;
     if (this.settings.control !== 'drag') this.settings.control = 'charge';
     sfx.setMuted(!this.settings.sound);
@@ -341,7 +343,7 @@ class Game {
   reachX(x) {
     let lo = 40;
     let hi = this.W - 40;
-    if (!this.portrait) {
+    if (!this.portrait && this.settings.spreadLimit) {
       const b = this.backLeg;
       const bx = b.state === 'stepping' ? b.tx : b.x;
       const r = this.soleLen * this.spreadMax;
@@ -366,6 +368,10 @@ class Game {
     c.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('gesturestart', (e) => e.preventDefault());
     window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && ui.settingsOpen()) {
+        ui.closeSettings(this);
+        return;
+      }
       if (e.key === 'Escape' || e.key === 'p') {
         if (this.state === 'play') this.pause();
         else if (this.state === 'pause') this.resume();
@@ -849,13 +855,14 @@ class Game {
    * `grip` above the sole. Full pressure is reached at fullY, well clear of
    * the bottom edge (a swipe up from there can leave the browser): at most
    * 80% of the way down and at least 80 CSS px (plus the safe area) above the
-   * edge. The press travel from touchdown to full is about 80 CSS px.
+   * edge. The press travel from touchdown to full is the original 110 units
+   * (a shorter travel made a light pull already a full press).
    */
   pressMap() {
     const css = 1 / this.scale; // world units per CSS px
     const contact = this.dragY();
     const fullY = Math.min(this.H * 0.8, this.H - 80 * css - this.safe.b);
-    const range = clamp(80 * css, 55, 110);
+    const range = 110;
     const grip = Math.max(this.soleLen * 0.25, contact - (fullY - range));
     return { contact, grip, range };
   }
@@ -1002,7 +1009,7 @@ class Game {
     const b = this.backLeg;
     const gap = Math.abs(b.x - foot.x);
     if (b.state === 'planted' && (gap < this.soleLen * 0.7 || (!this.portrait && gap > this.soleLen * STANCE_MAX))) this.maybeStepBackLeg();
-    sfx.heelTap(0.3);
+    sfx.heelTap(0.45);
     this.vibrate(8);
     this.fx.dust(foot.x, foot.y, 0, (foot.soleAt() / 165) * 0.5);
     const fp = this.dragFootprint(KILL_AT);
@@ -1487,9 +1494,23 @@ const ui = {
   game: null,
   show(name) {
     if (name === 'over') this.shownAt = performance.now();
-    for (const id of ['menu', 'pause', 'over', 'loading']) {
+    for (const id of ['menu', 'pause', 'settings', 'over', 'loading']) {
       $(id).hidden = id !== name;
     }
+  },
+  /** The 设置 page, opened from the main menu or the pause menu; 返回 goes back there. */
+  openSettings(g, from) {
+    this.settingsFrom = from;
+    this.refreshMenu(g);
+    this.show('settings');
+  },
+  closeSettings(g) {
+    const back = this.settingsFrom === 'pause' && g.state === 'pause' ? 'pause' : 'menu';
+    if (back === 'menu') this.refreshMenu(g);
+    this.show(back);
+  },
+  settingsOpen() {
+    return !$('settings').hidden;
   },
   refreshMenu(g) {
     const b = g.records.best;
@@ -1507,17 +1528,16 @@ const ui = {
   /** Control-mode button labels and the matching how-to lines. */
   refreshControl(g) {
     const drag = g.settings.control === 'drag';
-    const label = drag ? '操控：拖动压' : '操控：蓄力踩';
-    for (const id of ['btn-control', 'btn-control2']) $(id).textContent = label;
-    const skinLabel = `外观：${SKINS[g.settings.skin].label}`;
-    for (const id of ['btn-skin', 'btn-skin2']) $(id).textContent = skinLabel;
+    $('btn-control').textContent = drag ? '操控：拖动压' : '操控：蓄力踩';
+    $('btn-skin').textContent = `外观：${SKINS[g.settings.skin].label}`;
     // the sticky-sole switch only matters for the drag control
-    for (const id of ['btn-sticky', 'btn-sticky2']) {
-      const b = $(id);
-      b.hidden = !drag;
-      b.textContent = g.settings.sticky ? '粘鞋：开' : '粘鞋：关';
-      b.setAttribute('aria-pressed', String(g.settings.sticky));
-    }
+    const st = $('btn-sticky');
+    st.hidden = !drag;
+    st.textContent = g.settings.sticky ? '粘鞋：开' : '粘鞋：关';
+    st.setAttribute('aria-pressed', String(g.settings.sticky));
+    const sp = $('btn-spread');
+    sp.textContent = g.settings.spreadLimit ? '跨度限制：开' : '跨度限制：关';
+    sp.setAttribute('aria-pressed', String(g.settings.spreadLimit));
     const lines = drag
       ? [
           ['按住拖动', '：脚跟着手指走'],
@@ -1668,7 +1688,6 @@ async function boot() {
     ui.refreshControl(game);
   };
   $('btn-control').addEventListener('click', toggleControl);
-  $('btn-control2').addEventListener('click', toggleControl);
   const toggleSticky = () => {
     game.settings.sticky = !game.settings.sticky;
     if (!game.settings.sticky) game.clearSticky();
@@ -1678,23 +1697,41 @@ async function boot() {
     ui.refreshControl(game);
   };
   $('btn-sticky').addEventListener('click', toggleSticky);
-  $('btn-sticky2').addEventListener('click', toggleSticky);
+  $('btn-spread').addEventListener('click', () => {
+    game.settings.spreadLimit = !game.settings.spreadLimit;
+    game.saveSettings();
+    sfx.initAudio();
+    sfx.click();
+    ui.refreshControl(game);
+  });
   const toggleSkin = async () => {
     const names = Object.keys(SKINS);
     const next = names[(names.indexOf(game.settings.skin) + 1) % names.length];
     sfx.initAudio();
     sfx.click();
-    for (const id of ['btn-skin', 'btn-skin2']) $(id).disabled = true;
+    $('btn-skin').disabled = true;
     try {
       await game.setSkin(next);
     } catch (err) {
       console.warn(err);
     }
-    for (const id of ['btn-skin', 'btn-skin2']) $(id).disabled = false;
+    $('btn-skin').disabled = false;
     ui.refreshControl(game);
   };
   $('btn-skin').addEventListener('click', toggleSkin);
-  $('btn-skin2').addEventListener('click', toggleSkin);
+  $('btn-settings').addEventListener('click', () => {
+    sfx.initAudio();
+    sfx.click();
+    ui.openSettings(game, 'menu');
+  });
+  $('btn-settings2').addEventListener('click', () => {
+    sfx.click();
+    ui.openSettings(game, 'pause');
+  });
+  $('btn-back').addEventListener('click', () => {
+    sfx.click();
+    ui.closeSettings(game);
+  });
   // warm the other skin in the background so switching is instant
   for (const name of Object.keys(SKINS)) if (name !== game.settings.skin) loadSkin(name).catch(() => {});
   $('btn-resume').addEventListener('click', () => game.resume());

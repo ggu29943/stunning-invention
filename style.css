@@ -152,6 +152,27 @@ button.primary.alt {
 
 .toggles button[aria-pressed="false"] { color: var(--muted); opacity: 0.75; }
 
+/* the main menu's way into the 设置 page */
+.more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.more button {
+  min-height: 42px;
+  min-width: 140px;
+  font-size: 14px;
+  padding: 6px 18px;
+}
+
+/* 设置 page: every setting in one grid, then 返回 */
+#settings .card { width: min(440px, 100%); }
+#settings h2 { margin-bottom: 10px; }
+#settings .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 10px; }
+#settings .toggles button[hidden] { display: none; }
+#settings .hint { margin: 0 0 12px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+
 .best {
   margin: 12px 0 0;
   font-size: 12px;
@@ -257,10 +278,13 @@ button.primary.alt {
   .howto { font-size: 12px; }
 }
 
-/* short landscape screens: the settings buttons (up to six) sit in rows of
-   three; the pause menu's buttons too, under a full-width 继续 */
+/* short landscape screens: the settings buttons sit in rows of three; the
+   pause menu's buttons too, under a full-width 继续 */
 @media (max-height: 460px) and (orientation: landscape) {
   #menu .card { width: min(540px, 100%); }
+  #settings .card { width: min(560px, 100%); }
+  #settings .toggles { grid-template-columns: repeat(3, 1fr); }
+  #settings .hint { margin-bottom: 8px; }
   .toggles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .toggles button { font-size: 12px; padding: 4px 8px; min-height: 40px; white-space: nowrap; }
   .toggles button[hidden] { display: none; }
@@ -284,7 +308,13 @@ button.primary.alt {
   #menu .sub { grid-column: 1; grid-row: 2; }
   #menu .howto { grid-column: 1; grid-row: 3 / span 3; justify-self: center; }
   #menu .actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
-  #menu .toggles { grid-column: 2; grid-row: 3; margin-top: 8px; }
+  #menu .more { grid-column: 2; grid-row: 3; margin-top: 8px; }
   #menu .best { grid-column: 2; grid-row: 4; }
   #menu .credit { grid-column: 2; grid-row: 5; }
+}
+
+/* very short landscape (browser toolbars showing): the 设置 page drops its
+   explanation line so every button still fits */
+@media (max-height: 300px) and (orientation: landscape) {
+  #settings .hint { display: none; }
 }

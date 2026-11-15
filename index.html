@@ -34,13 +34,8 @@
         <button id="btn-timed" class="primary">60 秒挑战</button>
         <button id="btn-endless" class="primary alt">无尽解压</button>
       </div>
-      <div class="toggles">
-        <button id="btn-sound" aria-pressed="true">声音：开</button>
-        <button id="btn-vibrate" aria-pressed="true">震动：开</button>
-        <button id="btn-control">操控：蓄力踩</button>
-        <button id="btn-sticky" hidden>粘鞋：开</button>
-        <button id="btn-skin">外观：长靴</button>
-        <button id="btn-fs">全屏</button>
+      <div class="more">
+        <button id="btn-settings">设置</button>
       </div>
       <p id="best" class="best"></p>
       <p class="credit">角色与高跟鞋素材由原作者授权使用</p>
@@ -52,12 +47,29 @@
       <h2>暂停</h2>
       <div class="actions column">
         <button id="btn-resume" class="primary">继续</button>
-        <button id="btn-control2">操控：蓄力踩</button>
-        <button id="btn-sticky2" hidden>粘鞋：开</button>
-        <button id="btn-skin2">外观：长靴</button>
+        <button id="btn-settings2">设置</button>
         <button id="btn-finish">结算本局</button>
         <button id="btn-restart">重新开始</button>
         <button id="btn-menu">主菜单</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="settings" class="overlay" hidden>
+    <div class="card">
+      <h2>设置</h2>
+      <div class="toggles">
+        <button id="btn-sound" aria-pressed="true">声音：开</button>
+        <button id="btn-vibrate" aria-pressed="true">震动：开</button>
+        <button id="btn-control">操控：蓄力踩</button>
+        <button id="btn-sticky" hidden>粘鞋：开</button>
+        <button id="btn-skin">外观：长靴</button>
+        <button id="btn-spread" aria-pressed="true">跨度限制：开</button>
+        <button id="btn-fs">全屏</button>
+      </div>
+      <p class="hint">跨度限制：横屏时抬起的脚离站着的脚最远 3.5 个鞋长，不会劈叉（竖屏不受影响）</p>
+      <div class="actions">
+        <button id="btn-back" class="primary">返回</button>
       </div>
     </div>
   </section>
