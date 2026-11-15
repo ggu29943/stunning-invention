@@ -1457,9 +1457,12 @@ class Game {
       if (!leg.drawOnTop()) items.push({ y: leg.sortY() + (leg.back ? -0.5 : 0.5), leg });
     }
     items.sort((p, q) => p.y - q.y);
-    // sticky strands hang under the sole, behind both boots (and the ants
-    // in front of them), never across a boot
-    this.drawStrands(ctx);
+    // Sticky strands hang under the sole. Pressed or just lifted (the lowest
+    // zone) they stay behind both boots and the ants in front of them; once
+    // the raised boot is in the 2nd or 3rd zone its red sole faces the camera,
+    // so the strands are drawn over the boot, glued to the sole itself.
+    const strandsInFront = foot.drawOnTop() && foot.state === 'follow' && foot.zone >= 1;
+    if (!strandsInFront) this.drawStrands(ctx);
     for (const it of items) {
       if (it.a) drawAnt(ctx, this, it.a);
       else it.leg.draw(ctx, this.assets, this.pressure, this.time);
@@ -1468,6 +1471,7 @@ class Game {
     this.fx.drawFront(ctx);
     // the raised foot is closest to the camera
     if (foot.drawOnTop()) foot.draw(ctx, this.assets, this.pressure, this.time);
+    if (strandsInFront) this.drawStrands(ctx);
     this.fx.drawTexts(ctx);
 
     if (this.fx.flash > 0) {
