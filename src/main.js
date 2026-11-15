@@ -1207,7 +1207,9 @@ class Game {
         gx: clamp(a.x, foot.x - half, foot.x + half),
         gy: foot.y + rand(-5, 5),
         frac: clamp((a.x - foot.x) / half, -1, 1),
-        maxLen: rand(45, 100) * (this.soleLen / 205),
+        // shorter than the held boot can rise (0.42 of the reach), so pulling
+        // straight up always tears it in the end
+        maxLen: Math.min(rand(45, 100) * (this.soleLen / 205), foot.hMaxAt(this.dragY()) * 0.42 - 6),
         blob: chance(0.6),
         wob: rand(0, 6),
       });
