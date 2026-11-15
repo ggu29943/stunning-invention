@@ -22,8 +22,10 @@ export const CHARGE_TIME = 0.85;
 // (lift_0). The stomp control's charge raises the boot through the zones.
 const FOLLOW_SIDE = 6;
 export const ZONE_FRAMES = ['lift_2', 'lift_1', 'lift_0'];
-// drag control: the back leg shifts weight as the front boot presses down
-export const BACK_POSES = ['stand_1', 'twist_0', 'twist_1'];
+// The back leg shifts weight as the front boot presses down (drag control:
+// stand_1 -> twist_0 -> twist_1); while the front boot grinds it either stays
+// put or, past the kill line, lifts off the street (pose 3, drawn with lift_0).
+export const BACK_POSES = ['stand_1', 'twist_0', 'twist_1', 'lift_0'];
 
 const LIFT_MULT = 1.32; // raised foot is closer to the camera
 
@@ -49,6 +51,7 @@ export class Leg {
     this.zone = 0; // which ZONE_FRAMES pose is showing
     this.hMax = 300; // tallest height (sets the zones)
     this.dropFrom = 0; // stomp control: height the stomp falls from
+    this.grindingT = 0; // drag control: >0 while the pressed boot is being slid (a grind)
   }
 
   /** Drag control: pick the height zone, with a little hysteresis at each border. */
@@ -95,10 +98,10 @@ export class Leg {
   }
 
   /** Draw the boot lifted h above the street at (x, y): side-on near it, else the zone's pose. */
-  drawLifted(ctx, assets, x, y, h, squash = 1, wob = 0) {
+  drawLifted(ctx, assets, x, y, h, squash = 1, wob = 0, side = 'stand_0') {
     const { img, meta } = assets;
     if (h < FOLLOW_SIDE) {
-      drawPlanted(ctx, img.stand_0, meta.stand_0, x + wob, y - h, this.frameScale('stand_0', y), squash);
+      drawPlanted(ctx, img[side], meta[side], x + wob, y - h, this.frameScale(side, y), squash);
       return;
     }
     const name = ZONE_FRAMES[this.zone];
@@ -346,18 +349,27 @@ export class Leg {
           const tipX = this.x - ((ref.toe[0] + ref.heel[0]) / 2 - ref.toe[0]) * s;
           const m = meta[pose];
           const sy = 1 - this.squash * 0.035;
-          drawSprite(ctx, pick(pose), m, tipX - m.toe[0] * s, this.y - m.toe[2] * s * sy, s, sy);
+          // lifted: toe raised off its spot
+          const up = pose === 'lift_0' ? this.soleAt() * 0.22 : 0;
+          drawSprite(ctx, pick(pose), m, tipX - m.toe[0] * s, this.y - up - m.toe[2] * s * sy, s, sy);
           break;
         }
         drawPlanted(ctx, pick(name), meta[name], this.x + wob, this.y, s, 1 - this.squash * 0.035);
         break;
       }
       case 'follow': {
-        // on the street it compresses and trembles with pressure
+        // on the street it compresses and trembles with pressure; slid, it
+        // grinds with the same twist as the stomp control's grind
         const onGround = this.h <= 0.01;
-        const wob = onGround ? (Math.random() - 0.5) * pressure * pressure * 2.2 : 0;
+        let wob = onGround ? (Math.random() - 0.5) * pressure * pressure * 2.2 : 0;
+        let side = 'stand_0';
+        if (onGround && this.grindingT > 0) {
+          const f = Math.floor(this.grindT / 0.11) % 4;
+          side = f === 1 || f === 2 ? 'twist_0' : 'stand_0';
+          wob += Math.sin(this.grindT * 40) * 2.5;
+        }
         const squash = onGround ? 1 - pressure * 0.07 - this.squash * 0.035 : 1;
-        this.drawLifted(ctx, assets, this.x, this.y, this.h, squash, wob);
+        this.drawLifted(ctx, assets, this.x, this.y, this.h, squash, wob, side);
         break;
       }
       case 'stepping': {

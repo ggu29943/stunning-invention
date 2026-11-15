@@ -145,9 +145,9 @@ export function drawHUD(ctx, g, assets) {
     ctx.fillStyle = full ? (Math.floor(g.time * 14) % 2 ? '#fff' : '#ff2350') : grad;
     ctx.fillRect(gx, gy0 + gh * (1 - p), 6, gh * p);
   }
-  if (g.settings.control === 'drag') {
-    // drag control: a tick where the back leg shifts its weight, and the
-    // line where ants pinned under the boot die
+  if (g.settings.control === 'drag' || g.foot.state === 'grinding') {
+    // drag control (and any grind): a tick where the back leg shifts its
+    // weight, and the line where ants under the boot die
     ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
     ctx.fillRect(gx - 2, gy0 + gh * (1 - g.backP1) - 1, 10, 2);
     const ky = gy0 + gh * (1 - g.killAt);

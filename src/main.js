@@ -578,7 +578,7 @@ class Game {
     }
     this.fx.dust(fp.x, leg.y, 0.1, (leg.soleAt() / 165) * 0.7);
     this.fx.shake(2.5, 0.12);
-    sfx.stomp(0.15);
+    sfx.heelTap(0.4);
     sfx.crunch(dead.length);
   }
 
@@ -672,6 +672,10 @@ class Game {
         sfx.ding(false);
         this.vibrate(15);
       }
+    } else if (foot.state === 'grinding' && ptr && ptr.mode === 'grind') {
+      // grinding bears down harder the longer it is held (the back leg lifts
+      // once it passes the kill line); it crushes from the start, as before
+      this.pressure = Math.min(1, this.pressure + dt / CHARGE_TIME);
     } else if (!foot.isAirborne()) {
       this.pressure = Math.max(0, this.pressure - dt * 4);
     }
@@ -768,9 +772,21 @@ class Game {
     return fp;
   }
 
-  /** Drag control: which BACK_POSES pose the back leg shows (0..2). */
+  /** Is the front boot grinding (either control)? */
+  isGrinding() {
+    const f = this.foot;
+    return f.state === 'grinding' || (f.state === 'follow' && f.h <= 0.01 && f.grindingT > 0);
+  }
+
+  /**
+   * Which BACK_POSES pose the back leg shows. While the front boot grinds it
+   * has two: still (0), or lifted off the street once the grind is past the
+   * kill line (3: all the weight on the grinding boot). While a dragged boot
+   * presses it has three (0..2).
+   */
   backPose() {
     const f = this.foot;
+    if (this.isGrinding()) return this.pressure >= KILL_AT ? 3 : 0;
     if (this.settings.control !== 'drag' || f.state !== 'follow' || f.h > 0.01) return 0;
     if (this.pressure >= KILL_AT) return 2;
     if (this.pressure >= BACK_P1) return 1;
@@ -831,6 +847,8 @@ class Game {
       const b = this.backLeg;
       const keep = this.soleLen * 0.75;
       if (b.state === 'planted' && Math.abs(nx - b.x) < keep && Math.abs(nx - b.x) < Math.abs(foot.x - b.x)) nx = foot.x;
+      // sliding a pressed boot is a grind, like the stomp control's
+      if (Math.abs(nx - foot.x) > 0.3) foot.grindingT = 0.22;
       foot.x = nx;
       foot.h = 0;
       this.pressure += (t.p - this.pressure) * Math.min(1, dt * 14);
@@ -859,6 +877,12 @@ class Game {
     }
     if (!wasDown && isDown) this.touchdown();
     else if (wasDown && !isDown) this.liftoff();
+    if (!isDown) foot.grindingT = 0;
+    if (foot.grindingT > 0) {
+      foot.grindingT = Math.max(0, foot.grindingT - dt);
+      foot.grindT += dt;
+      s_grindFx(this, foot, dt);
+    }
     if (isDown) this.pressing(dt);
   }
 
@@ -871,7 +895,7 @@ class Game {
     // weight); it only hops aside if the boot came down right on top of it
     const b = this.backLeg;
     if (b.state === 'planted' && Math.abs(b.x - foot.x) < this.soleLen * 0.7) this.maybeStepBackLeg();
-    sfx.stomp(0.05);
+    sfx.heelTap(0.3);
     this.vibrate(8);
     this.fx.dust(foot.x, foot.y, 0, (foot.soleAt() / 165) * 0.5);
     const fp = this.dragFootprint(KILL_AT);
@@ -1343,6 +1367,12 @@ class Game {
       drawHUD(ctx, this, this.assets);
     }
   }
+}
+
+/** Dust and a little shake while a boot grinds (shared feel for both controls). */
+function s_grindFx(game, foot, dt) {
+  if (Math.random() < dt * 12) game.fx.dust(foot.x + rand(-40, 40), foot.y, 0, 0.35);
+  game.fx.shake(1.2, 0.05);
 }
 
 // ---------------------------------------------------------------------- UI

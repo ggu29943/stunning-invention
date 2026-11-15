@@ -56,23 +56,58 @@ function noiseBurst(t, dur, { type = 'lowpass', freq = 800, q = 0.7, gain = 0.5 
   src.start(t, Math.random() * 0.5, dur + 0.05);
 }
 
+/**
+ * A stiletto striking pavement: the heel tip's sharp click (with a short
+ * metallic ring), the sole slapping down a beat later, a faint street echo,
+ * and only a short low thump for weight. `power` (0..1) adds body.
+ */
 export function stomp(power = 0.5) {
   if (!ready()) return;
-  const t = ctx.currentTime;
+  heelStrike(ctx.currentTime, 0.35 + power * 0.65, power);
+}
+
+/** A light heel tap (setting the boot down gently, the back leg stepping). */
+export function heelTap(volume = 0.35) {
+  if (!ready()) return;
+  heelStrike(ctx.currentTime, volume, 0);
+}
+
+function heelStrike(t, vol, power) {
+  // heel tip: broadband transient + a brief high ring
+  noiseBurst(t, 0.018, { type: 'highpass', freq: 2600, gain: 0.95 * vol });
+  const ring = ctx.createOscillator();
+  ring.type = 'triangle';
+  const f0 = 2900 + Math.random() * 700;
+  ring.frequency.setValueAtTime(f0, t);
+  ring.frequency.exponentialRampToValueAtTime(f0 * 0.92, t + 0.05);
+  const rg = ctx.createGain();
+  rg.gain.setValueAtTime(0.0001, t);
+  rg.gain.exponentialRampToValueAtTime(0.13 * vol, t + 0.002);
+  rg.gain.exponentialRampToValueAtTime(0.0005, t + 0.06);
+  ring.connect(rg).connect(master);
+  ring.start(t);
+  ring.stop(t + 0.08);
+  // sole slapping the street right after the heel
+  noiseBurst(t + 0.012, 0.045 + power * 0.03, { type: 'bandpass', freq: 1300 + power * 300, q: 1.1, gain: (0.32 + 0.2 * power) * vol });
+  // a short thump for weight (kept brief so it never sounds muffled)
   const o = ctx.createOscillator();
   o.type = 'sine';
-  o.frequency.setValueAtTime(150 + power * 40, t);
-  o.frequency.exponentialRampToValueAtTime(38, t + 0.28);
+  o.frequency.setValueAtTime(115 + power * 35, t);
+  o.frequency.exponentialRampToValueAtTime(55, t + 0.09);
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.6 + power * 0.4, t + 0.008);
-  g.gain.exponentialRampToValueAtTime(0.001, t + 0.35 + power * 0.15);
+  g.gain.exponentialRampToValueAtTime((0.07 + 0.22 * power) * vol, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0005, t + 0.11 + power * 0.07);
   o.connect(g).connect(master);
   o.start(t);
-  o.stop(t + 0.6);
-  noiseBurst(t, 0.12 + power * 0.1, { freq: 500 + power * 600, gain: 0.35 + power * 0.25 });
-  // heel click
-  noiseBurst(t, 0.03, { type: 'highpass', freq: 3500, gain: 0.25 });
+  o.stop(t + 0.22);
+  if (power >= 1) {
+    // full pressure: the street cracks
+    noiseBurst(t + 0.008, 0.09, { type: 'lowpass', freq: 900, gain: 0.3 * vol });
+  }
+  // the click echoing off the buildings
+  noiseBurst(t + 0.075, 0.012, { type: 'highpass', freq: 2800, gain: 0.12 * vol });
+  noiseBurst(t + 0.15, 0.01, { type: 'highpass', freq: 3000, gain: 0.05 * vol });
 }
 
 export function crunch(count) {
