@@ -33,7 +33,19 @@ python3 -m http.server 8000
 # 手机和电脑在同一个 Wi-Fi 下时，用 http://<电脑IP>:8000 访问
 ```
 
-部署到任意静态托管（GitHub Pages、Netlify、Vercel 等）都可以，把仓库根目录发布出去即可。iOS Safari 不支持网页全屏 API，可以用"分享 → 添加到主屏幕"，以全屏 App 的方式运行。
+### 部署到 GitHub Pages
+
+仓库里带了部署流程 `.github/workflows/pages.yml`：每次推送到默认分支，都会用 `tools/build_site.sh` 打包游戏运行需要的文件（约 1MB，不含 `assets/source` 里的原始高清素材和工具脚本），然后发布到 GitHub Pages。
+
+第一次需要在仓库里手动开启一次：**Settings → Pages → Build and deployment → Source 选 “GitHub Actions”**。之后到 **Actions** 页重新运行一次 “Deploy to GitHub Pages”（或者再推送一次）。网址是：
+
+```
+https://<用户名>.github.io/<仓库名>/
+```
+
+注意：私有仓库要开 GitHub Pages，需要 GitHub Pro 或团队版。免费账号得把仓库改成公开才行（网站本身无论如何都是公开的）。
+
+想部署到别的静态托管（Netlify、Cloudflare Pages 等），运行 `tools/build_site.sh`，把生成的 `_site` 目录发布出去即可。iOS Safari 不支持网页全屏 API，可以用"分享 → 添加到主屏幕"，以全屏 App 的方式运行。
 
 ## 目录
 
