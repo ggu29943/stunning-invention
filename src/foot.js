@@ -24,8 +24,9 @@ const FOLLOW_SIDE = 6;
 export const ZONE_FRAMES = ['lift_2', 'lift_1', 'lift_0'];
 // The back leg shifts weight as the front boot presses down (drag control:
 // stand_1 -> twist_0 -> twist_1); while the front boot grinds it either stays
-// put or, past the kill line, lifts off the street (pose 3, drawn with lift_0).
-export const BACK_POSES = ['stand_1', 'twist_0', 'twist_1', 'lift_0'];
+// put or, past the kill line, raises its heel (twist_1) -- its toe always
+// stays planted, so she never stands on one foot.
+export const BACK_POSES = ['stand_1', 'twist_0', 'twist_1'];
 
 const LIFT_MULT = 1.32; // raised foot is closer to the camera
 
@@ -349,9 +350,7 @@ export class Leg {
           const tipX = this.x - ((ref.toe[0] + ref.heel[0]) / 2 - ref.toe[0]) * s;
           const m = meta[pose];
           const sy = 1 - this.squash * 0.035;
-          // lifted: toe raised off its spot
-          const up = pose === 'lift_0' ? this.soleAt() * 0.22 : 0;
-          drawSprite(ctx, pick(pose), m, tipX - m.toe[0] * s, this.y - up - m.toe[2] * s * sy, s, sy);
+          drawSprite(ctx, pick(pose), m, tipX - m.toe[0] * s, this.y - m.toe[2] * s * sy, s, sy);
           break;
         }
         drawPlanted(ctx, pick(name), meta[name], this.x + wob, this.y, s, 1 - this.squash * 0.035);

@@ -1,5 +1,5 @@
 import { clamp, rand, randi, chance, store, ellipseDist } from './util.js';
-import { loadAssets } from './assets.js';
+import { loadSkin, SKINS } from './assets.js';
 import { buildScene, drawNeons } from './scene.js';
 import { Swarm, drawAnt, depthScale } from './ants.js';
 import { Leg, CHARGE_TIME } from './foot.js';
@@ -29,7 +29,8 @@ class Game {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.assets = assets;
-    this.settings = { sound: true, vibrate: true, control: 'charge', sticky: true, ...store.get(SETTINGS_KEY, {}) };
+    this.settings = { sound: true, vibrate: true, control: 'charge', sticky: true, skin: 'boots', ...store.get(SETTINGS_KEY, {}) };
+    if (!SKINS[this.settings.skin]) this.settings.skin = 'boots';
     this.settings.sticky = this.settings.sticky !== false;
     this.stickChance = STICK_CHANCE;
     if (this.settings.control !== 'drag') this.settings.control = 'charge';
@@ -282,6 +283,14 @@ class Game {
     if (f.state === 'follow') this.endFollow();
     const b = this.backLeg;
     if (b.state === 'stepping') b.place(b.tx, b.ty);
+  }
+
+  /** Switch the boots' artwork (both skins have the same poses and landmarks). */
+  async setSkin(name) {
+    const skin = await loadSkin(name);
+    this.assets = skin;
+    this.settings.skin = skin.name;
+    this.saveSettings();
   }
 
   saveSettings() {
@@ -780,13 +789,13 @@ class Game {
 
   /**
    * Which BACK_POSES pose the back leg shows. While the front boot grinds it
-   * has two: still (0), or lifted off the street once the grind is past the
-   * kill line (3: all the weight on the grinding boot). While a dragged boot
-   * presses it has three (0..2).
+   * has two: still (0), or heel raised once the grind is past the kill line
+   * (2: weight forward onto the grinding boot, toe still planted). While a
+   * dragged boot presses it has three (0..2).
    */
   backPose() {
     const f = this.foot;
-    if (this.isGrinding()) return this.pressure >= KILL_AT ? 3 : 0;
+    if (this.isGrinding()) return this.pressure >= KILL_AT ? 2 : 0;
     if (this.settings.control !== 'drag' || f.state !== 'follow' || f.h > 0.01) return 0;
     if (this.pressure >= KILL_AT) return 2;
     if (this.pressure >= BACK_P1) return 1;
@@ -1402,6 +1411,8 @@ const ui = {
     const drag = g.settings.control === 'drag';
     const label = drag ? '操控：拖动压' : '操控：蓄力踩';
     for (const id of ['btn-control', 'btn-control2']) $(id).textContent = label;
+    const skinLabel = `外观：${SKINS[g.settings.skin].label}`;
+    for (const id of ['btn-skin', 'btn-skin2']) $(id).textContent = skinLabel;
     // the sticky-sole switch only matters for the drag control
     for (const id of ['btn-sticky', 'btn-sticky2']) {
       const b = $(id);
@@ -1492,7 +1503,8 @@ async function boot() {
   ui.show('loading');
   let assets;
   try {
-    assets = await loadAssets((k) => {
+    const saved = store.get(SETTINGS_KEY, {}).skin;
+    assets = await loadSkin(SKINS[saved] ? saved : 'boots', (k) => {
       $('load-bar').style.width = `${Math.round(k * 100)}%`;
     });
   } catch (err) {
@@ -1569,6 +1581,24 @@ async function boot() {
   };
   $('btn-sticky').addEventListener('click', toggleSticky);
   $('btn-sticky2').addEventListener('click', toggleSticky);
+  const toggleSkin = async () => {
+    const names = Object.keys(SKINS);
+    const next = names[(names.indexOf(game.settings.skin) + 1) % names.length];
+    sfx.initAudio();
+    sfx.click();
+    for (const id of ['btn-skin', 'btn-skin2']) $(id).disabled = true;
+    try {
+      await game.setSkin(next);
+    } catch (err) {
+      console.warn(err);
+    }
+    for (const id of ['btn-skin', 'btn-skin2']) $(id).disabled = false;
+    ui.refreshControl(game);
+  };
+  $('btn-skin').addEventListener('click', toggleSkin);
+  $('btn-skin2').addEventListener('click', toggleSkin);
+  // warm the other skin in the background so switching is instant
+  for (const name of Object.keys(SKINS)) if (name !== game.settings.skin) loadSkin(name).catch(() => {});
   $('btn-resume').addEventListener('click', () => game.resume());
   $('btn-finish').addEventListener('click', () => game.end());
   $('btn-restart').addEventListener('click', () => game.start(game.mode));

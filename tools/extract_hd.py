@@ -24,21 +24,30 @@ from PIL import Image
 from scipy import ndimage as ndi
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "assets", "source", "hd")
-OUT = os.path.join(ROOT, "assets", "sprites", "hd")
+# Skins: the same 11 poses, in the same order, drawn as patent boots (hd) and
+# as black stockings with pumps. Output: assets/sprites/<out>/<frame>.webp
+SKINS = {
+    "boots": {"src": os.path.join(ROOT, "assets", "source", "hd"), "suffix": "boot",
+              "out": os.path.join(ROOT, "assets", "sprites", "hd")},
+    "stockings": {"src": os.path.join(ROOT, "assets", "source", "stockings"), "suffix": "stocking",
+                  "out": os.path.join(ROOT, "assets", "sprites", "stockings")},
+}
+FACE_SRC = SKINS["boots"]["src"]
+FACE_OUT = SKINS["boots"]["out"]
 
-BOOTS = {
-    "01_boot": "lift_0",   # foot coming up, toe down (used for the back-leg step)
-    "02_boot": "stand_0",
-    "03_boot": "stand_1",
-    "04_boot": "twist_0",
-    "05_boot": "lift_1",   # sole up, cocked back (full pressure)
-    "06_boot": "stand_2",
-    "07_boot": "stand_3",
-    "08_boot": "twist_1",
-    "09_boot": "lift_2",   # sole up
-    "10_boot": "stand_4",
-    "11_boot": "stand_5",
+# frame number -> sprite name (shared by every skin)
+FRAMES = {
+    "01": "lift_0",   # foot coming up, toe down (used for the back-leg step)
+    "02": "stand_0",
+    "03": "stand_1",
+    "04": "twist_0",
+    "05": "lift_1",   # sole up, cocked back (full pressure)
+    "06": "stand_2",
+    "07": "stand_3",
+    "08": "twist_1",
+    "09": "lift_2",   # sole up
+    "10": "stand_4",
+    "11": "stand_5",
 }
 FACES = {"12_green_portrait": "face_green", "13_red_portrait": "face_red"}
 
@@ -168,6 +177,8 @@ def boot_points(alpha, rgb):
     # draws the sprite only from here down, so it must be one solid run of
     # leather. Hand-cut tops are wavy/open, so take the first row whose
     # neighbourhood (bilinear sampling reads r-1..r+2) is solid edge to edge.
+    # (stray specks were already removed by clean_alpha, so min..max is the
+    # silhouette's real extent on that row)
     def solid(y):
         xs = np.nonzero(alpha[y] > 0.5)[0]
         return len(xs) > 4 and alpha[y, xs.min() + 2:xs.max() - 1].min() > 0.9
@@ -210,30 +221,45 @@ def save_webp(arr, path, quality=86):
     Image.fromarray(arr, "RGBA").save(path, "WEBP", quality=quality, alpha_quality=90, method=6)
 
 
-def main():
-    os.makedirs(OUT, exist_ok=True)
+def clean_alpha(alpha):
+    """Drop stray specks left by the hand cut (keep the big silhouette)."""
+    big = keep_big(alpha > 0.5, frac=0.02)
+    keep = ndi.binary_dilation(big, iterations=3)
+    return np.where(keep, alpha, 0.0)
+
+
+def process_skin(name, cfg, previews):
+    os.makedirs(cfg["out"], exist_ok=True)
     meta = {}
-    previews = []
-    for src, name in BOOTS.items():
-        im0 = Image.open(os.path.join(SRC, f"{src}.png"))
+    for num, frame in FRAMES.items():
+        path = os.path.join(cfg["src"], f"{num}_{cfg['suffix']}.png")
+        im0 = Image.open(path)
         rgb = np.asarray(im0.convert("RGB"))
         # hand-cut sources carry their own alpha; otherwise rebuild it
         alpha = (np.asarray(im0.getchannel("A")).astype(float) / 255
                  if im0.mode == "RGBA" else boot_mask(rgb))
+        alpha = clean_alpha(alpha)
         ys, xs = np.nonzero(alpha > 0.02)
         y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
         rgba = np.dstack([np.maximum(rgb, 5), (alpha * 255).astype(np.uint8)])[y0:y1, x0:x1]
         im = Image.fromarray(rgba, "RGBA")
         im = im.resize((round(im.width * BOOT_SCALE), round(im.height * BOOT_SCALE)), Image.LANCZOS)
         arr = np.asarray(im)
-        save_webp(arr, os.path.join(OUT, f"{name}.webp"))
-        m = {"w": im.width, "h": im.height, "src": src}
+        save_webp(arr, os.path.join(cfg["out"], f"{frame}.webp"))
+        m = {"w": im.width, "h": im.height, "src": f"{num}_{cfg['suffix']}"}
         m.update(boot_points(arr[:, :, 3] / 255.0, arr[:, :, :3]))
-        meta[name] = m
-        previews.append((name, im))
-        print(name, m)
+        meta[frame] = m
+        previews.append((f"{name}:{frame}", im))
+        print(name, frame, {k: m[k] for k in ("w", "h", "toe", "heel", "shaft", "footc")})
+    return meta
+
+
+def main():
+    previews = []
+    metas = {name: process_skin(name, cfg, previews) for name, cfg in SKINS.items()}
+    # portraits are shared by every skin; they live with the boots
     for src, name in FACES.items():
-        im0 = Image.open(os.path.join(SRC, f"{src}.png"))
+        im0 = Image.open(os.path.join(FACE_SRC, f"{src}.png"))
         full = np.asarray(im0.convert("RGBA"))
         s = min(full.shape[0], full.shape[1])
         x0 = (full.shape[1] - s) // 2
@@ -242,23 +268,24 @@ def main():
                  if im0.mode == "RGBA" else face_alpha(rgb))
         im = Image.fromarray(np.dstack([rgb, (alpha * 255).astype(np.uint8)]), "RGBA")
         im = im.resize((FACE_SIZE, FACE_SIZE), Image.LANCZOS)
-        save_webp(np.asarray(im), os.path.join(OUT, f"{name}.webp"), quality=90)
-        meta[name] = {"w": FACE_SIZE, "h": FACE_SIZE, "src": src}
+        save_webp(np.asarray(im), os.path.join(FACE_OUT, f"{name}.webp"), quality=90)
+        metas["boots"][name] = {"w": FACE_SIZE, "h": FACE_SIZE, "src": src}
         previews.append((name, im))
-    with open(os.path.join(OUT, "sprites.json"), "w") as f:
-        json.dump(meta, f, indent=1)
+    for name, cfg in SKINS.items():
+        with open(os.path.join(cfg["out"], "sprites.json"), "w") as f:
+            json.dump(metas[name], f, indent=1)
 
     if "--preview" in sys.argv:
         out = sys.argv[sys.argv.index("--preview") + 1]
-        th = 360
+        th = 300
         tiles = [im.resize((max(1, int(im.width * th / im.height)), th)) for _, im in previews]
         W = sum(t.width + 6 for t in tiles)
-        sheet = Image.new("RGBA", (W, th), (230, 60, 200, 255))
+        sheet = Image.new("RGBA", (W, th), (70, 170, 90, 255))
         x = 0
         for t in tiles:
             sheet.alpha_composite(t, (x, 0))
             x += t.width + 6
-        sheet.convert("RGB").save(out, quality=88)
+        sheet.convert("RGB").save(out, quality=85)
 
 
 if __name__ == "__main__":
