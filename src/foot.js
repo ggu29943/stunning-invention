@@ -17,11 +17,12 @@ export const STEP_TIME = 0.26;
 export const CHARGE_TIME = 0.85;
 // The raised boot's pose is picked by height zone, as in the video, in both
 // controls. Near the street (below FOLLOW_SIDE px) it is side-on (stand_0); in
-// the air the lowest third shows the sole angled down (lift_2), the middle
-// third the cocked-back red sole (lift_1), the top third the toe-down lift
-// (lift_0). The stomp control's charge raises the boot through the zones.
+// the air the lowest third shows the cocked-back red sole (lift_1, 05), the
+// middle third the flatter sole angled down (lift_2, 09), the top third the
+// toe-down lift (lift_0, 01). The stomp control's charge raises the boot
+// through the zones.
 const FOLLOW_SIDE = 6;
-export const ZONE_FRAMES = ['lift_2', 'lift_1', 'lift_0'];
+export const ZONE_FRAMES = ['lift_1', 'lift_2', 'lift_0'];
 // The back leg shifts weight as the front boot presses down or grinds (both
 // share the same zones: stand_1 -> twist_0 -> twist_1 at the kill line); its
 // toe always stays planted, so she never stands on one foot.
