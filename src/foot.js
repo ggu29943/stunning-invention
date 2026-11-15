@@ -15,10 +15,11 @@ export const RAISE_TIME = 0.09;
 export const STOMP_TIME = 0.075;
 export const STEP_TIME = 0.26;
 export const CHARGE_TIME = 0.85;
-// drag control: the boot's pose is picked by height zone, as in the video.
-// On the street (below FOLLOW_SIDE px) it stands side-on (stand_0); in the
-// air the lowest third shows the sole angled down (lift_2), the middle third
-// the cocked-back red sole (lift_1), the top third the toe-down lift (lift_0).
+// The raised boot's pose is picked by height zone, as in the video, in both
+// controls. Near the street (below FOLLOW_SIDE px) it is side-on (stand_0); in
+// the air the lowest third shows the sole angled down (lift_2), the middle
+// third the cocked-back red sole (lift_1), the top third the toe-down lift
+// (lift_0). The stomp control's charge raises the boot through the zones.
 const FOLLOW_SIDE = 6;
 export const ZONE_FRAMES = ['lift_2', 'lift_1', 'lift_0'];
 // drag control: the back leg shifts weight as the front boot presses down
@@ -44,9 +45,10 @@ export class Leg {
     this.hoverY = 0;
     this.grindT = 0;
     this.squash = 0;
-    this.h = 0; // drag control: height of the sole above the street
-    this.zone = 0; // drag control: which ZONE_FRAMES pose is showing
-    this.hMax = 300; // drag control: tallest reachable height (sets the zones)
+    this.h = 0; // height of the boot's lowest point above the street
+    this.zone = 0; // which ZONE_FRAMES pose is showing
+    this.hMax = 300; // tallest height (sets the zones)
+    this.dropFrom = 0; // stomp control: height the stomp falls from
   }
 
   /** Drag control: pick the height zone, with a little hysteresis at each border. */
@@ -59,17 +61,50 @@ export class Leg {
     }
   }
 
-  /** Drag control: sprite scale of the lifted pose (grows as it rises toward the camera). */
-  zoneScale(name) {
-    const lift = clamp((this.h - FOLLOW_SIDE) / (this.hMax * 0.6), 0, 1);
-    return this.frameScale(name, this.y) * lerp(1.02, LIFT_MULT, lift);
+  /** Tallest height for a boot over street depth y: its lowest point stays below ~42% of the screen. */
+  hMaxAt(y) {
+    return Math.max(90, y - this.game.H * 0.42);
   }
 
-  /** Drag control: where a lifted pose is drawn (foot centre at x, lowest point h above the street). */
-  zoneOrigin(name) {
+  /**
+   * Stomp control: charging raises the boot from the low zone (p 0, still
+   * clearly off the street) to the top one (p 1); each pose holds for about
+   * a third of the charge.
+   */
+  chargeHeight(pressure, y) {
+    return this.hMaxAt(y) * (0.12 + 0.83 * clamp(pressure, 0, 1));
+  }
+
+  /** Sprite scale of a lifted pose (grows as it rises toward the camera). */
+  zoneScale(name, h = this.h, y = this.y) {
+    const lift = clamp((h - FOLLOW_SIDE) / (this.hMax * 0.6), 0, 1);
+    return this.frameScale(name, y) * lerp(1.02, LIFT_MULT, lift);
+  }
+
+  /**
+   * Where a lifted pose is drawn: its foot centre lined up with the standing
+   * boot's foot centre over x (no sideways jump when it lands), lowest point
+   * h above the street at depth y.
+   */
+  zoneOrigin(name, x = this.x, y = this.y, h = this.h) {
     const m = this.meta[name];
-    const s = this.zoneScale(name);
-    return { m, s, dx: this.x - m.footc[0] * s, dy: this.y - this.h - m.toe[2] * s };
+    const s = this.zoneScale(name, h, y);
+    const st = this.meta.stand_0;
+    const off = (st.footc[0] - (st.toe[0] + st.heel[0]) / 2) * this.frameScale('stand_0', y);
+    return { m, s, dx: x + off - m.footc[0] * s, dy: y - h - m.toe[2] * s };
+  }
+
+  /** Draw the boot lifted h above the street at (x, y): side-on near it, else the zone's pose. */
+  drawLifted(ctx, assets, x, y, h, squash = 1, wob = 0) {
+    const { img, meta } = assets;
+    if (h < FOLLOW_SIDE) {
+      drawPlanted(ctx, img.stand_0, meta.stand_0, x + wob, y - h, this.frameScale('stand_0', y), squash);
+      return;
+    }
+    const name = ZONE_FRAMES[this.zone];
+    const { m, s, dx, dy } = this.zoneOrigin(name, x, y, h);
+    drawSprite(ctx, img[name], m, dx, dy, s);
+    if (name !== 'lift_0') drawSmears(ctx, this.game.sticky, m, dx, dy, s);
   }
 
   get meta() {
@@ -77,6 +112,8 @@ export class Leg {
   }
 
   place(x, y) {
+    this.h = 0;
+    this.zone = 0;
     this.x = this.tx = this.hoverX = x;
     this.y = this.ty = this.hoverY = y;
     this.state = 'planted';
@@ -98,11 +135,7 @@ export class Leg {
     return this.soleAt(y) / soleLen(this.meta.stand_0);
   }
 
-  hoverHeight(pressure) {
-    // sole centre height above the aim point; even at zero pressure the
-    // stiletto clears the street by a visible gap
-    return (190 + 70 * pressure) * (this.game.soleLen / 205);
-  }
+
 
   /** Footprint ellipse (kill zone) plus the stiletto tip, for a boot at x, y. */
   footprint(x = this.x, y = this.y, pressure = 0.5) {
@@ -151,6 +184,8 @@ export class Leg {
     this.hoverY = ty;
     this.state = 'raising';
     this.t = 0;
+    this.h = 0;
+    this.zone = 0;
   }
 
   aim(tx, ty) {
@@ -162,6 +197,7 @@ export class Leg {
     if (this.state !== 'hover' && this.state !== 'raising') return false;
     this.state = 'stomping';
     this.t = 0;
+    this.dropFrom = this.h;
     return true;
   }
 
@@ -214,7 +250,7 @@ export class Leg {
   }
 
   /** Returns 'landed' on the frame a stomp or step touches the ground. */
-  update(dt) {
+  update(dt, pressure = 0) {
     this.t += dt;
     if (this.squash > 0) this.squash = Math.max(0, this.squash - dt * 6);
     switch (this.state) {
@@ -222,6 +258,9 @@ export class Leg {
         const k = Math.min(1, dt * 22);
         this.hoverX = lerp(this.hoverX, this.tx, k);
         this.hoverY = lerp(this.hoverY, this.ty, k);
+        this.hMax = this.hMaxAt(this.hoverY);
+        this.h = this.chargeHeight(pressure, this.hoverY) * easeOutCubic(clamp(this.t / RAISE_TIME, 0, 1));
+        this.updateZone();
         if (this.t >= RAISE_TIME) {
           this.state = 'hover';
           this.t = 0;
@@ -232,15 +271,24 @@ export class Leg {
         const k = Math.min(1, dt * 18);
         this.hoverX = lerp(this.hoverX, this.tx, k);
         this.hoverY = lerp(this.hoverY, this.ty, k);
+        // charging lifts the boot up through the pose zones
+        this.hMax = this.hMaxAt(this.hoverY);
+        this.h += (this.chargeHeight(pressure, this.hoverY) - this.h) * Math.min(1, dt * 16);
+        this.updateZone();
         break;
       }
       case 'stomping': {
         const k = Math.min(1, dt * 30);
         this.hoverX = lerp(this.hoverX, this.tx, k);
         this.hoverY = lerp(this.hoverY, this.ty, k);
+        // falls back down through the zones
+        this.h = this.dropFrom * (1 - easeInQuad(clamp(this.t / STOMP_TIME, 0, 1)));
+        this.updateZone();
         if (this.t >= STOMP_TIME) {
           this.x = this.tx;
           this.y = this.ty;
+          this.h = 0;
+          this.zone = 0;
           this.state = 'planted';
           this.squash = 1;
           return 'landed';
@@ -305,20 +353,11 @@ export class Leg {
         break;
       }
       case 'follow': {
-        const h = this.h;
-        if (h < FOLLOW_SIDE) {
-          // side-on on the street; it compresses and trembles with pressure
-          const s = this.frameScale('stand_0');
-          const onGround = h <= 0.01;
-          const wob = onGround ? (Math.random() - 0.5) * pressure * pressure * 2.2 : 0;
-          const squash = onGround ? 1 - pressure * 0.07 - this.squash * 0.035 : 1;
-          drawPlanted(ctx, img.stand_0, meta.stand_0, this.x + wob, this.y - h, s, squash);
-        } else {
-          const name = ZONE_FRAMES[this.zone];
-          const { m, s, dx, dy } = this.zoneOrigin(name);
-          drawSprite(ctx, img[name], m, dx, dy, s);
-          if (name !== 'lift_0') drawSmears(ctx, this.game.sticky, m, dx, dy, s);
-        }
+        // on the street it compresses and trembles with pressure
+        const onGround = this.h <= 0.01;
+        const wob = onGround ? (Math.random() - 0.5) * pressure * pressure * 2.2 : 0;
+        const squash = onGround ? 1 - pressure * 0.07 - this.squash * 0.035 : 1;
+        this.drawLifted(ctx, assets, this.x, this.y, this.h, squash, wob);
         break;
       }
       case 'stepping': {
@@ -345,25 +384,15 @@ export class Leg {
       case 'raising':
       case 'hover':
       case 'stomping': {
-        let lift = 1;
-        if (this.state === 'raising') lift = easeOutCubic(clamp(this.t / RAISE_TIME, 0, 1));
-        if (this.state === 'stomping') lift = 1 - easeInQuad(clamp(this.t / STOMP_TIME, 0, 1));
-        const name = pressure >= 0.6 ? 'lift_1' : 'lift_2';
-        const m = meta[name];
-        const sGround = this.frameScale(name, this.hoverY);
-        const s = sGround * lerp(1.02, LIFT_MULT, lift);
-        const tremble = this.state === 'hover' ? pressure * pressure * 3 : 0;
+        // same height zones as the drag control; charging trembles the boot
         const baseX =
           this.state === 'raising'
             ? lerp(this.fromX, this.hoverX, easeOutCubic(clamp(this.t / RAISE_TIME, 0, 1)))
             : this.hoverX;
-        // on landing the lowest point of the lift frame (toe[2]) meets the street
-        const groundSole = this.hoverY - (m.toe[2] - m.sole[1]) * s;
-        const sx = baseX + (Math.random() - 0.5) * tremble;
-        const sy = lerp(groundSole, this.hoverY - this.hoverHeight(pressure), lift) + (Math.random() - 0.5) * tremble;
-        const dx = sx - m.sole[0] * s;
-        const dy = sy - m.sole[1] * s;
-        drawSprite(ctx, img[name], m, dx, dy, s);
+        const tremble = this.state === 'hover' ? pressure * pressure * 3 : 0;
+        const x = baseX + (Math.random() - 0.5) * tremble;
+        const y = this.hoverY + (Math.random() - 0.5) * tremble * 0.5;
+        this.drawLifted(ctx, assets, x, y, this.h);
         break;
       }
       default:

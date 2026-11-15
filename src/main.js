@@ -820,7 +820,7 @@ class Game {
     const t = steering ? this.followTargets(ptr) : { x: foot.x, h: 0, p: 0 };
     // tallest pose: the boot's lowest point no higher than ~42% of the screen
     // (as in the video, the raised boot stays in view); the zones split it in thirds
-    foot.hMax = Math.max(90, this.dragY() - this.H * 0.42);
+    foot.hMax = foot.hMaxAt(this.dragY());
     const wasDown = foot.h <= 0.01;
     const held = st.strands.length > 0;
     if (wasDown && t.h <= LIFT_HYST) {
