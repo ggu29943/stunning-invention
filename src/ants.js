@@ -209,11 +209,6 @@ export function drawAnt(ctx, g, a) {
   }
 
   const body = a.wounded ? '#3d0c16' : '#0a0610';
-  if (a.state === 'trapped') {
-    // pinned against a black sole: a light glow keeps the ant readable
-    ctx.shadowColor = 'rgba(255, 235, 245, 0.95)';
-    ctx.shadowBlur = 3;
-  }
   const swing = Math.sin(a.phase);
   // legs
   ctx.strokeStyle = body;

@@ -155,6 +155,12 @@ export function drawHUD(ctx, g, assets) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     shadowText(ctx, '致死', gx + 13, ky, crushed ? '#ffe14f' : '#ffffff');
+    // how many ants the boot is holding down right now
+    const pinned = g.press && !crushed ? g.press.pinned.length : 0;
+    if (pinned) {
+      ctx.font = `800 12px ${FONT}`;
+      shadowText(ctx, `压住 ×${pinned}`, gx + 13, ky - 18, '#ff8fb8');
+    }
   }
   ctx.save();
   ctx.translate(gx + 3, gy0 + gh + 8);
@@ -203,10 +209,10 @@ function drawPortrait(ctx, g, assets) {
   const bounce = 1 + g.portraitPulse * 0.08;
   const x = g.W - fw - 12;
   const y = 12;
-  // gentle idle float (the ego circles below stay put)
+  // the character floats gently inside a frame that stays put
   const float = Math.sin(g.time * 1.9) * 2.5;
   ctx.save();
-  ctx.translate(x + fw / 2, y + fh / 2 + float);
+  ctx.translate(x + fw / 2, y + fh / 2);
   ctx.scale(bounce, bounce);
   ctx.translate(-fw / 2, -fh / 2);
   if (g.portraitPulse > 0) ctx.translate((Math.random() - 0.5) * 4 * g.portraitPulse, 0);
@@ -222,9 +228,10 @@ function drawPortrait(ctx, g, assets) {
   ctx.fill();
   ctx.clip();
   // green-eyed normally, red-eyed when the pressure is full or after a big stomp
-  const size = fw * 1.06;
+  // drawn a little oversized and low, so the float never shows a gap at the bottom
+  const size = fw * 1.09;
   const fx = (fw - size) / 2;
-  const fy = fh - size + 2;
+  const fy = fh - size + 5 + float;
   const mix = clamp(g.redMix || 0, 0, 1);
   if (mix < 1) ctx.drawImage(img.face_green, fx, fy, size, size);
   if (mix > 0) {

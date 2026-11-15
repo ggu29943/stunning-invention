@@ -1,7 +1,5 @@
 import { clamp, lerp, easeInQuad, easeOutCubic } from './util.js';
 
-const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
-
 // Sprites come from assets/sprites/hd (see tools/extract_hd.py). Each frame has
 // landmarks in sprite pixels: toe [x0, x1, groundY], heel [x, y] (stiletto
 // tip), sole [x, y] (centre of the red sole), shaft [x0, x1, row] (leg width
@@ -17,7 +15,13 @@ export const RAISE_TIME = 0.09;
 export const STOMP_TIME = 0.075;
 export const STEP_TIME = 0.26;
 export const CHARGE_TIME = 0.85;
-export const LOWER_TIME = 0.26; // drag control: the boot is set down gently
+// drag control: below FOLLOW_SIDE px of height the boot is drawn side-on
+// (stand_0); above FOLLOW_SOLE px it shows its sole (lift_2); in between the
+// two drawings cross-fade
+// (switch quickly: the sticky strands hold the boot low, and the sole view
+// with its smears is what should show while they stretch)
+const FOLLOW_SIDE = 6;
+const FOLLOW_SOLE = 16;
 
 const LIFT_MULT = 1.32; // raised foot is closer to the camera
 
@@ -39,6 +43,7 @@ export class Leg {
     this.hoverY = 0;
     this.grindT = 0;
     this.squash = 0;
+    this.h = 0; // drag control: height of the sole above the street
   }
 
   get meta() {
@@ -134,12 +139,47 @@ export class Leg {
     return true;
   }
 
-  /** Drag control: set the raised boot down gently (no impact). */
-  lower() {
-    if (this.state !== 'hover' && this.state !== 'raising') return false;
-    this.state = 'lowering';
-    this.t = 0;
+  /**
+   * Drag control: the boot follows the finger. The game sets x and h (sole
+   * height above the street at depth y) every frame.
+   */
+  follow() {
+    if (this.state !== 'planted' && this.state !== 'follow') return false;
+    if (this.state === 'planted') this.h = 0;
+    this.state = 'follow';
     return true;
+  }
+
+  /**
+   * Drag control: a point on the boot's underside (frac -1..1 = left..right
+   * along the sole), where the sticky strands are drawn from. Side-on it is
+   * the bottom edge; in the sole view it is on the red sole itself.
+   */
+  underside(frac) {
+    const h = this.h;
+    if (this.state === 'follow' && h >= FOLLOW_SIDE) {
+      const m = this.meta.lift_2;
+      const lift = clamp((h - FOLLOW_SIDE) / (this.hoverHeight(0) * 0.9), 0, 1);
+      const s = this.frameScale('lift_2', this.y) * lerp(1.02, LIFT_MULT, lift);
+      const sy = this.y - h - (m.toe[2] - m.sole[1]) * s;
+      const dx = this.x - m.sole[0] * s;
+      const dy = sy - m.sole[1] * s;
+      let [ux, uy, a, b] = m.soleAxis;
+      if (ux < 0) {
+        ux = -ux;
+        uy = -uy;
+      }
+      // a little below the axis, toward the sole's lower edge
+      const px = m.sole[0] + ux * a * frac * 0.7 - uy * b * 0.35;
+      const py = m.sole[1] + uy * a * frac * 0.7 + ux * b * 0.35;
+      return [dx + px * s, dy + py * s];
+    }
+    return [this.x + frac * this.soleAt() * 0.4, this.y - h - 1];
+  }
+
+  /** Drag control: a following boot that is clearly in the air is drawn above the ants. */
+  drawOnTop() {
+    return this.isAirborne() || (this.state === 'follow' && this.h >= FOLLOW_SIDE);
   }
 
   stepTo(x, y) {
@@ -151,10 +191,7 @@ export class Leg {
     this.t = 0;
   }
 
-  /**
-   * Returns 'landed' on the frame a stomp or step touches the ground, and
-   * 'placed' when a gently lowered boot reaches it (it is then 'pressing').
-   */
+  /** Returns 'landed' on the frame a stomp or step touches the ground. */
   update(dt) {
     this.t += dt;
     if (this.squash > 0) this.squash = Math.max(0, this.squash - dt * 6);
@@ -188,23 +225,6 @@ export class Leg {
         }
         break;
       }
-      case 'lowering': {
-        const k = Math.min(1, dt * 20);
-        this.hoverX = lerp(this.hoverX, this.tx, k);
-        this.hoverY = lerp(this.hoverY, this.ty, k);
-        if (this.t >= LOWER_TIME) {
-          this.x = this.tx;
-          this.y = this.ty;
-          this.state = 'pressing';
-          this.grindT = 0;
-          this.squash = 0.25;
-          return 'placed';
-        }
-        break;
-      }
-      case 'pressing':
-        this.grindT += dt;
-        break;
       case 'stepping': {
         if (this.t >= STEP_TIME) {
           this.x = this.tx;
@@ -231,7 +251,7 @@ export class Leg {
   }
 
   isAirborne() {
-    return this.state === 'raising' || this.state === 'hover' || this.state === 'stomping' || this.state === 'lowering';
+    return this.state === 'raising' || this.state === 'hover' || this.state === 'stomping';
   }
 
   draw(ctx, assets, pressure) {
@@ -251,14 +271,35 @@ export class Leg {
         drawPlanted(ctx, pick(name), meta[name], this.x + wob, this.y, s, 1 - this.squash * 0.035);
         break;
       }
-      case 'pressing': {
-        // planted and pushing down: the boot compresses toward the street and
-        // trembles more as the pressure rises
-        const s = this.frameScale('stand_0');
-        const shake = pressure * pressure * 2.2;
-        const wob = (Math.random() - 0.5) * shake;
-        const squash = 1 - pressure * 0.07 - this.squash * 0.035;
-        drawPlanted(ctx, img.stand_0, meta.stand_0, this.x + wob, this.y, s, squash);
+      case 'follow': {
+        const h = this.h;
+        const k = clamp((h - FOLLOW_SIDE) / (FOLLOW_SOLE - FOLLOW_SIDE), 0, 1);
+        // cross-fade without see-through: the outgoing drawing stays opaque
+        // until the incoming one is, then fades out
+        const aSide = k < 0.5 ? 1 : (1 - k) * 2;
+        const aSole = Math.min(1, k * 2);
+        if (aSide > 0) {
+          // side-on; on the street it compresses and trembles with pressure
+          const s = this.frameScale('stand_0');
+          const onGround = h <= 0.01;
+          const wob = onGround ? (Math.random() - 0.5) * pressure * pressure * 2.2 : 0;
+          const squash = onGround ? 1 - pressure * 0.07 - this.squash * 0.035 : 1;
+          ctx.globalAlpha = aSide;
+          drawPlanted(ctx, img.stand_0, meta.stand_0, this.x + wob, this.y - h, s, squash);
+        }
+        if (aSole > 0) {
+          const m = meta.lift_2;
+          const lift = clamp((h - FOLLOW_SIDE) / (this.hoverHeight(0) * 0.9), 0, 1);
+          const s = this.frameScale('lift_2', this.y) * lerp(1.02, LIFT_MULT, lift);
+          // the lowest point of the frame (toe[2]) sits h above the street
+          const sy = this.y - h - (m.toe[2] - m.sole[1]) * s;
+          const dx = this.x - m.sole[0] * s;
+          const dy = sy - m.sole[1] * s;
+          ctx.globalAlpha = aSole;
+          drawSprite(ctx, img.lift_2, m, dx, dy, s);
+          drawSmears(ctx, this.game.sticky, m, dx, dy, s);
+        }
+        ctx.globalAlpha = 1;
         break;
       }
       case 'stepping': {
@@ -284,12 +325,10 @@ export class Leg {
       }
       case 'raising':
       case 'hover':
-      case 'stomping':
-      case 'lowering': {
+      case 'stomping': {
         let lift = 1;
         if (this.state === 'raising') lift = easeOutCubic(clamp(this.t / RAISE_TIME, 0, 1));
         if (this.state === 'stomping') lift = 1 - easeInQuad(clamp(this.t / STOMP_TIME, 0, 1));
-        if (this.state === 'lowering') lift = 1 - easeInOut(clamp(this.t / LOWER_TIME, 0, 1));
         const name = pressure >= 0.6 ? 'lift_1' : 'lift_2';
         const m = meta[name];
         const sGround = this.frameScale(name, this.hoverY);
@@ -331,6 +370,39 @@ function drawSprite(ctx, image, m, dx, dy, s, sy = 1) {
   const yCut = dy + cut * s * sy;
   if (yCut > top) ctx.drawImage(image, 0, row, m.w, 2, dx, top, m.w * s, yCut - top + 1);
   ctx.drawImage(image, 0, cut, m.w, m.h - cut, dx, yCut, m.w * s, (m.h - cut) * s * sy);
+}
+
+/**
+ * Squashed ants stuck to the red sole (drag control's sticky mechanic),
+ * painted in the sole's own frame: u along its long axis, v across it.
+ */
+function drawSmears(ctx, sticky, m, dx, dy, s) {
+  if (!sticky || !sticky.smears.length || !m.soleAxis) return;
+  const [ux, uy, a, b] = m.soleAxis;
+  const base = ctx.globalAlpha;
+  for (const sm of sticky.smears) {
+    const px = m.sole[0] + ux * a * sm.u * 0.8 - uy * b * sm.v * 0.7;
+    const py = m.sole[1] + uy * a * sm.u * 0.8 + ux * b * sm.v * 0.7;
+    const x = dx + px * s;
+    const y = dy + py * s;
+    const r = sm.r * s;
+    ctx.globalAlpha = base * clamp(sm.life / 1.5, 0, 1) * 0.92;
+    ctx.fillStyle = '#16050a';
+    ctx.beginPath();
+    ctx.ellipse(x, y, r * 1.6, r, Math.atan2(uy, ux), 0, Math.PI * 2);
+    ctx.fill();
+    // a few splayed legs
+    ctx.strokeStyle = '#16050a';
+    ctx.lineWidth = Math.max(0.8, r * 0.25);
+    ctx.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const ang = sm.seed + i * 1.7;
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(ang) * r * 2.4, y + Math.sin(ang) * r * 1.4);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = base;
 }
 
 function drawPlanted(ctx, image, m, x, y, s, squashY) {

@@ -13,6 +13,7 @@ export const RECORDS = [
   { key: 'trash', label: '补刀清理', live: true },
   { key: 'heel', label: '鞋跟暴击', live: true },
   { key: 'crush', label: '碾压时长(秒)', live: true, float: true },
+  { key: 'stuck', label: '粘在鞋底', live: true },
   { key: 'kills', label: '单局击杀', live: false },
   { key: 'ego', label: '单局自尊', live: false },
 ];
@@ -29,6 +30,7 @@ export function newSession() {
     trash: 0,
     heel: 0,
     crush: 0,
+    stuck: 0,
     stomps: 0,
   };
 }

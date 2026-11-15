@@ -13,7 +13,10 @@ const TIME_LIMIT = 60;
 const COMBO_WINDOW = 1.6;
 // drag control: pressure (0..1) at which ants pinned under the boot are crushed
 export const KILL_AT = 0.6;
-const PRESS_HINTS = 3; // show the "drag down" hint on the first presses of a round
+const PRESS_HINTS = 3; // show the "press down" hint on the first touchdowns of a round
+const STICK_CHANCE = 0.4; // drag control: a crushed ant sticks to the sole
+const MAX_STRANDS = 12;
+const MAX_SMEARS = 22;
 
 const $ = (id) => document.getElementById(id);
 
@@ -54,9 +57,12 @@ class Game {
     this.fullAnnounced = false;
     this.lastLevel = 0;
 
-    this.pointer = null; // { id, x, y, mode: 'aim' | 'press' | 'grind', queued, released, startY }
+    this.pointer = null; // { id, x, y, mode: 'aim' | 'follow' | 'grind', queued, released }
     this.killAt = KILL_AT;
-    this.press = null; // drag control: state of the current gentle press
+    this.press = null; // drag control: the boot's current stay on the street
+    // drag control: crushed ants glued between sole and street (strands) and
+    // squashed onto the sole (smears)
+    this.sticky = { strands: [], smears: [], anchorX: 0 };
 
     // env(safe-area-inset-*) resolved on a real property, so every engine returns px
     this.insetProbe = document.createElement('div');
@@ -133,9 +139,11 @@ class Game {
     this.fx.resize(this.W, this.H, this.walkTop);
 
     if (prevW) {
-      // a press in progress ends before the boots are re-placed (place()
-      // would otherwise skip endPress and leave ants pinned for good)
-      if (this.foot.state === 'pressing') this.endPress();
+      // a drag-control press ends before the boots are re-placed (place()
+      // would otherwise leave ants pinned for good); strands cannot survive
+      // the street moving under them
+      if (this.foot.state === 'follow') this.endFollow();
+      this.clearSticky();
       // keep everything on screen after a rotation / resize
       const mapY = (y) => this.bandTop + ((y - prevBandTop) / (prevBandBot - prevBandTop)) * (this.bandBot - this.bandTop);
       const mapX = (x) => (x / prevW) * this.W;
@@ -209,6 +217,7 @@ class Game {
     this.lastLevel = 0;
     this.press = null;
     this.pressHints = 0;
+    this.clearSticky();
     this.stepDelay = -1;
     this.fx.clear();
     this.placeLegs();
@@ -263,7 +272,7 @@ class Game {
       f.place(f.tx, f.ty);
       if (score) this.impact();
     }
-    if (f.state === 'lowering') f.place(f.tx, f.ty);
+    if (f.state === 'follow') this.endFollow();
     const b = this.backLeg;
     if (b.state === 'stepping') b.place(b.tx, b.ty);
   }
@@ -328,6 +337,15 @@ class Game {
       /* ignore */
     }
     const foot = this.foot;
+    const drag = this.settings.control === 'drag';
+    if (drag) {
+      // drag control: the whole screen steers the boot (no grind hot-spot;
+      // sliding a pressed boot grinds)
+      this.pointer = { id: e.pointerId, x, y, mode: 'follow', queued: false, released: false };
+      if (foot.state === 'stomping' || foot.state === 'grinding') this.pointer.queued = true;
+      else this.startFollow();
+      return;
+    }
     const hb = foot.hitBox();
     if (foot.state === 'planted' && x >= hb.x0 && x <= hb.x1 && y >= hb.y0 && y <= hb.y1) {
       this.pointer = { id: e.pointerId, x, y, mode: 'grind' };
@@ -336,35 +354,18 @@ class Game {
       this.grindX = x - foot.x;
       return;
     }
-    const drag = this.settings.control === 'drag';
-    this.pointer = { id: e.pointerId, x, y, startY: y, mode: drag ? 'press' : 'aim', queued: false, released: false };
+    this.pointer = { id: e.pointerId, x, y, mode: 'aim', queued: false, released: false };
     const [tx, ty] = this.aimPoint(x, y);
-    if (foot.state === 'stomping' || foot.state === 'lowering' || foot.state === 'grinding') {
+    if (foot.state === 'stomping' || foot.state === 'grinding' || foot.state === 'follow') {
       this.pointer.queued = true;
-    } else if (drag) {
-      this.beginPress(tx, ty);
     } else {
       this.beginAim(tx, ty);
     }
   }
 
-  /** Drag control: lift the boot over the finger, then set it down gently. */
-  beginPress(tx, ty) {
-    this.pressure = 0;
-    this.press = { autoLower: true, released: false, trapped: [], crushed: false, full: false, kills: 0, ego: 0, maxP: 0 };
-    this.foot.raise(tx, ty);
-  }
-
-  /** Drag control: pressure from how far the finger has been dragged down. */
-  pressTarget(ptr) {
-    // full pressure needs less travel when the press starts near the bottom
-    // edge, so it is always reachable on a phone held sideways
-    const room = this.H - ptr.startY;
-    const range = clamp(room * 0.8, 36, 120);
-    return clamp((ptr.y - ptr.startY) / range, 0, 1);
-  }
-
   beginAim(tx, ty) {
+    // lifting the boot for a stomp tears any sticky strands at once
+    if (this.sticky.strands.length) this.snapAll();
     this.press = null;
     this.pressure = 0;
     this.fullAnnounced = false;
@@ -399,10 +400,10 @@ class Game {
       p.released = true;
       return;
     }
-    if (p.mode === 'press') {
-      if (this.foot.state === 'pressing') this.endPress();
-      else if (this.press) this.press.released = true; // still coming down: just set it down
+    if (p.mode === 'follow') {
+      // on the street the boot just stands there; in the air it settles down
       this.pointer = null;
+      if (this.foot.state === 'follow' && this.foot.h <= 0.01) this.endFollow();
       return;
     }
     this.release();
@@ -430,8 +431,8 @@ class Game {
       this.foot.state = 'planted';
       this.stepDelay = 0.1;
     }
-    if (this.foot.state === 'pressing') this.endPress();
-    if (this.foot.state === 'raising' || this.foot.state === 'hover' || this.foot.state === 'lowering') {
+    if (this.foot.state === 'follow') this.endFollow();
+    if (this.foot.state === 'raising' || this.foot.state === 'hover') {
       // put the foot back where it was lifted from, without scoring (a released stomp still lands)
       this.foot.place(this.foot.fromX, this.foot.fromY);
     }
@@ -650,15 +651,9 @@ class Game {
     const foot = this.foot;
     const ptr = this.pointer;
 
-    // drag control: once lifted over the finger, the boot comes down gently
-    if (foot.state === 'hover' && this.press && this.press.autoLower) foot.lower();
-
-    // charge pressure while the foot is raised and the finger is down
-    if (foot.state === 'pressing') {
-      // drag control: pressure follows how far the finger is dragged down
-      const target = ptr && ptr.mode === 'press' ? this.pressTarget(ptr) : 0;
-      this.pressure += (target - this.pressure) * Math.min(1, dt * 14);
-      if (Math.abs(target - this.pressure) < 0.002) this.pressure = target;
+    // drag control: the boot follows the finger (sets its own pressure)
+    if (foot.state === 'follow') {
+      this.followUpdate(dt, ptr);
     } else if (ptr && ptr.mode === 'aim' && !ptr.queued && (foot.state === 'hover' || foot.state === 'raising')) {
       this.pressure = Math.min(1, this.pressure + dt / CHARGE_TIME);
       sfx.updateCharge(this.pressure);
@@ -671,7 +666,8 @@ class Game {
       this.pressure = Math.max(0, this.pressure - dt * 4);
     }
 
-    const threat = foot.isAirborne() ? foot.footprint(foot.hoverX, foot.hoverY, this.pressure) : null;
+    let threat = foot.isAirborne() ? foot.footprint(foot.hoverX, foot.hoverY, this.pressure) : null;
+    if (foot.state === 'follow' && foot.h > 0.01 && foot.h < 150) threat = this.dragFootprint(0.3);
     this.swarm.update(dt, threat);
 
     const ev = foot.update(dt, this.pressure);
@@ -679,14 +675,10 @@ class Game {
       this.impact();
       // a touch arrived while we were stomping: start it now
       if (ptr && ptr.queued) this.startQueued(ptr);
-    } else if (ev === 'placed') {
-      this.placed(this.pointer);
-      if (this.pointer && this.pointer.queued) this.startQueued(this.pointer);
     }
-    if (foot.state === 'pressing') this.pressUpdate(dt);
     if (foot.state === 'grinding' && ptr && ptr.mode === 'grind') {
       this.grind(dt, ptr);
-    } else if (foot.state === 'planted' && ptr && (ptr.mode === 'aim' || ptr.mode === 'press') && ptr.queued) {
+    } else if (foot.state === 'planted' && ptr && (ptr.mode === 'aim' || ptr.mode === 'follow') && ptr.queued) {
       // queued touch landed on a grinding foot that has since been released
       this.startQueued(ptr);
     }
@@ -699,6 +691,7 @@ class Game {
 
     this.feetBlockAnts();
     this.releaseStrays();
+    this.stickyUpdate(dt);
 
     if (this.comboT > 0) {
       this.comboT -= dt;
@@ -715,6 +708,11 @@ class Game {
   startQueued(ptr) {
     const foot = this.foot;
     ptr.queued = false;
+    if (ptr.mode === 'follow') {
+      if (ptr.released) this.pointer = null;
+      else this.startFollow();
+      return;
+    }
     const hb = foot.hitBox();
     if (ptr.x >= hb.x0 && ptr.x <= hb.x1 && ptr.y >= hb.y0 && ptr.y <= hb.y1) {
       if (ptr.released) {
@@ -729,15 +727,6 @@ class Game {
       return;
     }
     const [tx, ty] = this.aimPoint(ptr.x, ptr.y);
-    if (ptr.mode === 'press') {
-      ptr.startY = ptr.y; // drag distance counts from where this press starts
-      this.beginPress(tx, ty);
-      if (ptr.released) {
-        this.press.released = true;
-        this.pointer = null;
-      }
-      return;
-    }
     this.beginAim(tx, ty);
     if (ptr.released) {
       this.release();
@@ -746,46 +735,156 @@ class Game {
   }
 
   // ------------------------------------------------------------ drag control
-  /** The gently lowered boot has reached the street. */
-  placed(ptr) {
+  // The boot follows the finger. Its sole stays a "grip" below the finger, so
+  // the finger holds the ankle and never covers the ants. Above the street the
+  // finger sets x and the sole's height; pushing on past the street raises the
+  // pressure. Touching down pins the ants under the sole (alive); at KILL_AT
+  // they are crushed, some sticking to the sole; lifting again tears the
+  // sticky strands one by one.
+
+  /** Street depth the dragged boot walks along. */
+  dragY() {
+    return this.bandTop + (this.bandBot - this.bandTop) * 0.62;
+  }
+
+  /** The dragged boot covers more of the street's depth than a stomp aim. */
+  dragFootprint(p = this.pressure, x = this.foot.x) {
+    const fp = this.foot.footprint(x, this.dragY(), p);
+    fp.ry *= 1.45;
+    return fp;
+  }
+
+  /** Where the finger wants the boot: x, sole height above the street, pressure. */
+  followTargets(ptr) {
+    const grip = this.soleLen * 0.25;
+    const contact = this.dragY();
+    const sole = ptr.y + grip;
+    // full pressure is always reachable: the travel left below the touchdown
+    // point, capped to a comfortable range
+    const range = clamp(this.H - (contact - grip) - 10, 40, 110);
+    return {
+      x: clamp(ptr.x, 40, this.W - 40),
+      h: Math.max(0, contact - sole),
+      p: clamp((sole - contact) / range, 0, 1),
+    };
+  }
+
+  /** A finger went down in drag control: the boot starts following it. */
+  startFollow() {
     const foot = this.foot;
-    const press = this.press || { trapped: [], kills: 0, ego: 0, maxP: 0 };
-    this.press = press;
-    press.autoLower = false;
+    if (foot.state !== 'planted' && foot.state !== 'follow') return;
+    const y = this.dragY();
+    if (Math.abs(foot.y - y) > 0.5) {
+      // coming from the stomp control, where the boot can stand at any depth
+      foot.place(foot.x, y);
+    }
+    foot.follow();
+    this.pressure = 0;
+    this.press = foot.h <= 0.01 ? this.newPress() : null;
+  }
+
+  newPress() {
+    return { pinned: [], crushed: false, full: false, kills: 0, ego: 0, maxP: 0, tick: 0 };
+  }
+
+  followUpdate(dt, ptr) {
+    const foot = this.foot;
+    const st = this.sticky;
+    const steering = ptr && ptr.mode === 'follow' && !ptr.queued;
+    const t = steering ? this.followTargets(ptr) : { x: foot.x, h: 0, p: 0 };
+    const wasDown = foot.h <= 0.01;
+    const held = st.strands.length > 0;
+    if (wasDown && t.h <= 0) {
+      // on the street: a pressed boot slides only slowly; pressure follows
+      const maxStep = 140 * dt;
+      foot.x += clamp(t.x - foot.x, -maxStep, maxStep);
+      foot.h = 0;
+      this.pressure += (t.p - this.pressure) * Math.min(1, dt * 14);
+      if (Math.abs(t.p - this.pressure) < 0.002) this.pressure = t.p;
+    } else {
+      // in the air: follow the finger; glued strands hold the boot back so
+      // the player has to pull to tear them
+      const wantH = held ? t.h * 0.42 : t.h;
+      const wantX = held ? st.anchorX + (t.x - st.anchorX) * 0.35 : t.x;
+      const k = Math.min(1, dt * (held ? 12 : 24));
+      foot.x += (wantX - foot.x) * k;
+      foot.h += (wantH - foot.h) * k;
+      if (t.h <= 0 && foot.h < 0.6) foot.h = 0;
+      this.pressure += (0 - this.pressure) * Math.min(1, dt * 14);
+    }
+    foot.x = clamp(foot.x, 40, this.W - 40);
+    const isDown = foot.h <= 0.01;
+
+    if (!steering) {
+      // finger gone: once back on the street the boot simply stands
+      if (isDown) this.endFollow();
+      return;
+    }
+    if (!wasDown && isDown) this.touchdown();
+    else if (wasDown && !isDown) this.liftoff();
+    if (isDown) this.pressing(dt);
+  }
+
+  /** The dragged boot reached the street: ants under it are pinned, alive. */
+  touchdown() {
+    const foot = this.foot;
+    const press = (this.press = this.newPress());
     this.session.stomps++;
     this.stepDelay = 0.18;
-    sfx.stomp(0.04);
-    this.vibrate(6);
+    sfx.stomp(0.05);
+    this.vibrate(8);
     this.fx.dust(foot.x, foot.y, 0, (foot.soleAt() / 165) * 0.5);
-    const fp = foot.footprint(foot.x, foot.y, KILL_AT);
-    const holding = ptr && ptr.mode === 'press' && !ptr.queued && !press.released;
+    const fp = this.dragFootprint(KILL_AT);
     for (const { a, d } of this.swarm.query(fp.x, fp.y, fp.rx, fp.ry, 1.5)) {
-      if (holding && d < 1 && a.state !== 'trapped') {
+      if (d < 1 && a.state !== 'trapped') {
         a.state = 'trapped';
         a.scream = 1;
-        press.trapped.push(a);
+        press.pinned.push(a);
       } else if (a.state !== 'trapped') {
         this.swarm.panic(a, fp.x, fp.y, d < 1.2);
       }
     }
-    if (!holding) {
-      // finger already lifted: the boot just stands there
-      foot.state = 'planted';
-      this.press = null;
-      return;
-    }
-    if (press.trapped.length) sfx.squeak();
+    if (press.pinned.length) sfx.squeak();
     if (this.pressHints < PRESS_HINTS) {
       this.pressHints++;
-      this.fx.text(foot.x, foot.y - 120, '↓ 往下拖加力', { size: 16, color: '#ffffff', life: 1.4, vy: 22 });
+      this.fx.text(foot.x, foot.y - 130, '↓ 继续往下按', { size: 16, color: '#ffffff', life: 1.4, vy: 22 });
     }
   }
 
-  /** Every frame while the finger holds the boot down. */
-  pressUpdate(dt) {
-    const foot = this.foot;
+  /** The dragged boot left the street: whatever is still alive gets away. */
+  liftoff() {
+    this.freePinned();
+    this.press = null;
+    this.records.check(this.session);
+  }
+
+  freePinned() {
     const press = this.press;
     if (!press) return;
+    const foot = this.foot;
+    const hurt = press.maxP >= 0.3; // squeezed hard enough, they limp
+    for (const a of press.pinned) {
+      if (this.swarm.ants.includes(a)) this.swarm.release(a, foot.x, foot.y, hurt);
+    }
+    press.pinned = [];
+  }
+
+  /** End drag control's hold: the boot stands where it is (pause, finger up, etc). */
+  endFollow() {
+    const foot = this.foot;
+    this.freePinned();
+    this.press = null;
+    if (foot.state === 'follow') {
+      foot.h = 0;
+      foot.state = 'planted';
+    }
+    this.pressure = 0;
+  }
+
+  /** Every frame the dragged boot is on the street. */
+  pressing(dt) {
+    const foot = this.foot;
+    const press = this.press || (this.press = this.newPress());
     const s = this.session;
     const p = this.pressure;
     press.maxP = Math.max(press.maxP, p);
@@ -793,23 +892,27 @@ class Game {
       s.crush += dt;
       this.fx.shake(0.4 + p * 1.4, 0.05);
     }
-    // haptic ticks as the pressure builds toward the kill line
+    // haptic ticks as the pressure builds
     const step = Math.floor(p * 5);
-    if (step > (press.tick || 0)) {
-      press.tick = step;
-      this.vibrate(5 + step * 3);
-    } else if (step < (press.tick || 0)) {
-      press.tick = step;
+    if (step > press.tick) this.vibrate(5 + step * 3);
+    press.tick = step;
+    // a sliding boot lets go of pinned ants it no longer covers
+    const fp = this.dragFootprint(p);
+    for (const a of press.pinned) {
+      if (this.swarm.ants.includes(a) && ellipseDist(a.x, a.y, fp.x, fp.y, fp.rx, fp.ry) > 1.1) {
+        this.swarm.release(a, foot.x, foot.y, p >= 0.3);
+      }
     }
+    press.pinned = press.pinned.filter((a) => a.state === 'trapped');
     if (!press.crushed && p >= KILL_AT) this.crush();
     if (press.crushed) {
       // the street under a boot pressing this hard is lethal
-      const fp = foot.footprint(foot.x, foot.y, p);
       const dead = [];
       let ego = 0;
       for (const { a } of this.swarm.query(fp.x, fp.y, fp.rx, fp.ry, 1)) {
         ego += this.killAnt(a, { full: p >= 1 });
         dead.push(a);
+        this.maybeStick(a);
       }
       if (dead.length) {
         this.swarm.remove(dead);
@@ -831,8 +934,8 @@ class Game {
     const press = this.press;
     const p = this.pressure;
     press.crushed = true;
-    const fp = foot.footprint(foot.x, foot.y, p);
-    const victims = new Set(press.trapped.filter((a) => this.swarm.ants.includes(a)));
+    const fp = this.dragFootprint(p);
+    const victims = new Set(press.pinned.filter((a) => this.swarm.ants.includes(a)));
     const near = [];
     for (const { a, d } of this.swarm.query(fp.x, fp.y, fp.rx, fp.ry, 1.4)) {
       if (d < 1) victims.add(a);
@@ -840,9 +943,12 @@ class Game {
     }
     const dead = [...victims];
     let ego = 0;
-    for (const a of dead) ego += this.killAnt(a, { full: p >= 1 });
+    for (const a of dead) {
+      ego += this.killAnt(a, { full: p >= 1 });
+      this.maybeStick(a);
+    }
     this.swarm.remove(dead);
-    press.trapped = [];
+    press.pinned = [];
     press.kills += dead.length;
     press.ego += ego;
     for (const a of near) {
@@ -865,9 +971,8 @@ class Game {
   /** Pressure reached 100% after crushing: the 满压 flourish. */
   fullPress() {
     const foot = this.foot;
-    const press = this.press;
-    press.full = true;
-    const fp = foot.footprint(foot.x, foot.y, 1);
+    this.press.full = true;
+    const fp = this.dragFootprint(1);
     for (const { a, d } of this.swarm.query(fp.x, fp.y, fp.rx, fp.ry, 2.8)) {
       if (d >= 1.3 && a.state !== 'trapped') this.swarm.stun(a, rand(0.9, 1.5));
     }
@@ -898,20 +1003,151 @@ class Game {
     this.checkLevel();
   }
 
-  /** Finger lifted (or the press was cancelled) while holding the boot down. */
-  endPress() {
+  // ------------------------------------------------------------ sticky sole
+  /** A crushed ant may glue the sole to the street (drag control only). */
+  maybeStick(a) {
+    if (this.settings.control !== 'drag' || !chance(STICK_CHANCE)) return;
+    const st = this.sticky;
     const foot = this.foot;
-    const press = this.press;
-    if (foot.state === 'pressing') foot.state = 'planted';
-    if (!press) return;
-    // ants that were only pinned get away; squeezed hard enough, they limp
-    const hurt = press.maxP >= 0.3;
-    for (const a of press.trapped) {
-      if (this.swarm.ants.includes(a)) this.swarm.release(a, foot.x, foot.y, hurt);
+    const half = foot.soleAt() * 0.4;
+    if (st.strands.length < MAX_STRANDS) {
+      st.strands.push({
+        gx: a.x,
+        gy: a.y,
+        frac: clamp((a.x - foot.x) / half, -1, 1),
+        maxLen: rand(45, 100) * (this.soleLen / 205),
+        blob: chance(0.6),
+        wob: rand(0, 6),
+      });
+      st.anchorX = foot.x;
     }
-    press.trapped = [];
-    this.press = null;
-    this.records.check(this.session);
+    if (st.smears.length < MAX_SMEARS) {
+      st.smears.push({ u: rand(-0.9, 0.9), v: rand(-0.8, 0.8), r: rand(5, 9), life: rand(7, 11), seed: rand(0, 6) });
+    }
+    this.session.stuck = (this.session.stuck || 0) + 1;
+  }
+
+  /** Where strand i leaves the boot's lowest edge (its stretch is measured from here). */
+  strandTop(sd) {
+    const foot = this.foot;
+    return [foot.x + sd.frac * foot.soleAt() * 0.4, foot.y - foot.h - 1];
+  }
+
+  stickyUpdate(dt) {
+    const st = this.sticky;
+    const foot = this.foot;
+    // stuck smears dry up and drip off the raised sole
+    for (const sm of st.smears) sm.life -= dt * (foot.h > 30 ? 1.6 : 0.4);
+    if (foot.state === 'follow' && foot.h > 30 && st.smears.length && Math.random() < dt * 1.2) {
+      this.fx.goo(foot.x + rand(-0.3, 0.3) * foot.soleAt(), foot.y - foot.h, 3, foot.y + rand(-6, 6));
+    }
+    st.smears = st.smears.filter((sm) => sm.life > 0);
+    if (!st.strands.length) return;
+    if (foot.state !== 'follow' && foot.state !== 'planted') {
+      // the boot was lifted some other way (stomp control): tear everything
+      this.snapAll();
+      return;
+    }
+    const keep = [];
+    for (const sd of st.strands) {
+      const [px, py] = this.strandTop(sd);
+      if (Math.hypot(px - sd.gx, py - sd.gy) > sd.maxLen) {
+        const [ax, ay] = foot.underside(sd.frac);
+        this.snap(sd, ax, ay, true);
+      } else keep.push(sd);
+    }
+    const tore = keep.length < st.strands.length;
+    st.strands = keep;
+    if (tore && !keep.length) {
+      // the last strand gave way: the boot springs free
+      this.fx.text(foot.x, foot.y - foot.h - 40, '拽开!', { size: 20, color: '#ff8fb8', life: 1 });
+      this.vibrate([12, 10, 24]);
+      this.checkLevel();
+    }
+  }
+
+  /** One strand tears: goo flies, a little ego for the effort. */
+  snap(sd, ax, ay, sound) {
+    const mx = (ax + sd.gx) / 2;
+    const my = (ay + sd.gy) / 2;
+    this.fx.goo(mx, my, 5, sd.gy + rand(-4, 4));
+    this.session.ego += 2;
+    this.fx.text(mx, my - 10, '+2', { size: 12, color: '#ffb3cf', life: 0.5 });
+    if (sound) sfx.snap();
+    this.vibrate(8);
+  }
+
+  snapAll() {
+    const st = this.sticky;
+    for (const sd of st.strands) {
+      const [ax, ay] = this.foot.underside(sd.frac);
+      this.snap(sd, ax, ay, false);
+    }
+    if (st.strands.length) sfx.snap();
+    st.strands = [];
+  }
+
+  clearSticky() {
+    this.sticky.strands = [];
+    this.sticky.smears = [];
+  }
+
+  /** Glue strands between sole and street, sagging and thinning as they stretch. */
+  drawStrands(ctx) {
+    const st = this.sticky;
+    if (!st.strands.length) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const sd of st.strands) {
+      // how far it is stretched comes from the boot's actual separation
+      const [px, py] = this.strandTop(sd);
+      const len = Math.hypot(px - sd.gx, py - sd.gy);
+      if (len < 3) continue;
+      const k = clamp(len / sd.maxLen, 0, 1);
+      // but it is drawn from the sole itself
+      const [ax, ay] = this.foot.underside(sd.frac);
+      const sag = Math.sin(this.time * 3 + sd.wob) * 3 * (1 - k);
+      const mx = (ax + sd.gx) / 2 + sag;
+      const my = (ay + sd.gy) / 2;
+      // dark goo with a wet highlight, thinning as it stretches
+      const w = Math.max(1, 5.5 * (1 - k * 0.75));
+      ctx.strokeStyle = `rgba(20, 4, 10, ${0.95 - k * 0.25})`;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.quadraticCurveTo(mx, my, sd.gx, sd.gy);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255, 170, 200, ${0.35 - k * 0.2})`;
+      ctx.lineWidth = Math.max(0.5, w * 0.3);
+      ctx.beginPath();
+      ctx.moveTo(ax - w * 0.2, ay);
+      ctx.quadraticCurveTo(mx - w * 0.2, my, sd.gx - w * 0.2, sd.gy);
+      ctx.stroke();
+      // a glob where it meets the street
+      ctx.fillStyle = 'rgba(20, 4, 10, 0.9)';
+      ctx.beginPath();
+      ctx.ellipse(sd.gx, sd.gy, w * 1.1, w * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      if (sd.blob) {
+        // an ant dangling on the strand
+        const bx = ax + (sd.gx - ax) * 0.55 + sag * 0.5;
+        const by = ay + (sd.gy - ay) * 0.55;
+        ctx.fillStyle = '#12060c';
+        ctx.beginPath();
+        ctx.ellipse(bx, by, 4.2, 2.8, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#12060c';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i < 3; i++) {
+          const ang = sd.wob + i * 2.1 + Math.sin(this.time * 9 + i) * 0.3;
+          ctx.moveTo(bx, by);
+          ctx.lineTo(bx + Math.cos(ang) * 5, by + Math.sin(ang) * 3);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   grind(dt, ptr) {
@@ -944,7 +1180,7 @@ class Game {
 
   /** Safety net: no ant stays pinned unless a press is actually holding it. */
   releaseStrays() {
-    const holding = this.foot.state === 'pressing' && this.press ? this.press.trapped : null;
+    const holding = this.foot.state === 'follow' && this.press ? this.press.pinned : null;
     for (const a of this.swarm.ants) {
       if (a.state === 'trapped' && !(holding && holding.includes(a))) {
         this.swarm.release(a, this.foot.x, this.foot.y, false);
@@ -955,9 +1191,11 @@ class Game {
   /** Walking ants turn away instead of walking through a planted boot. */
   feetBlockAnts() {
     for (const leg of [this.foot, this.backLeg]) {
-      const pressingSoft = leg.state === 'pressing' && !(this.press && this.press.crushed);
-      if (leg.state !== 'planted' && !pressingSoft) continue;
-      const fp = leg.footprint(leg.x, leg.y, 0);
+      // a dragged boot standing on the street blocks too, until it has
+      // crushed (from then on ants walking in die instead)
+      const dragDown = leg === this.foot && leg.state === 'follow' && leg.h <= 0.01 && !(this.press && this.press.crushed);
+      if (leg.state !== 'planted' && !dragDown) continue;
+      const fp = dragDown ? this.dragFootprint(0) : leg.footprint(leg.x, leg.y, 0);
       for (const a of this.swarm.ants) {
         if (a.state !== 'walk') continue;
         const d = ellipseDist(a.x, a.y, fp.x, fp.y, fp.rx * 1.05, fp.ry * 1.25);
@@ -994,6 +1232,14 @@ class Game {
 
     // aim shadow on the street
     const foot = this.foot;
+    if (foot.state === 'follow' && foot.h > 0.01) {
+      const fp = this.dragFootprint(0);
+      const near = clamp(1 - foot.h / 160, 0, 1);
+      ctx.fillStyle = `rgba(0, 0, 0, ${0.15 + 0.35 * near})`;
+      ctx.beginPath();
+      ctx.ellipse(fp.x, fp.y, fp.rx, fp.ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     if (foot.isAirborne()) {
       const fp = foot.footprint(foot.hoverX, foot.hoverY, this.pressure);
       const lift = foot.state === 'stomping' ? 1 - foot.t / 0.075 : 1;
@@ -1012,16 +1258,9 @@ class Game {
     this.fx.drawBack(ctx);
 
     // depth-sorted: ants and planted legs
-    // ants pinned under a pressing boot are drawn after it (below), so the
-    // player can see them struggling at the sole
-    const pinned = [];
-    const items = [];
-    for (const a of this.swarm.ants) {
-      if (a.state === 'trapped') pinned.push(a);
-      else items.push({ y: a.y, a });
-    }
+    const items = this.swarm.ants.map((a) => ({ y: a.y, a }));
     for (const leg of [this.backLeg, this.foot]) {
-      if (!leg.isAirborne()) items.push({ y: leg.sortY() + (leg.back ? -0.5 : 0.5), leg });
+      if (!leg.drawOnTop()) items.push({ y: leg.sortY() + (leg.back ? -0.5 : 0.5), leg });
     }
     items.sort((p, q) => p.y - q.y);
     for (const it of items) {
@@ -1029,11 +1268,10 @@ class Game {
       else it.leg.draw(ctx, this.assets, this.pressure, this.time);
     }
 
-    for (const a of pinned) drawAnt(ctx, this, a);
-
+    this.drawStrands(ctx);
     this.fx.drawFront(ctx);
     // the raised foot is closest to the camera
-    if (foot.isAirborne()) foot.draw(ctx, this.assets, this.pressure, this.time);
+    if (foot.drawOnTop()) foot.draw(ctx, this.assets, this.pressure, this.time);
     this.fx.drawTexts(ctx);
 
     if (this.fx.flash > 0) {
@@ -1078,10 +1316,10 @@ const ui = {
     for (const id of ['btn-control', 'btn-control2']) $(id).textContent = label;
     const lines = drag
       ? [
-          ['按下', '屏幕，脚轻轻放下，压住的蚂蚁先不死'],
-          ['往下拖', '加大压力，过了致死线就踩扁'],
-          ['松手', '没过线的蚂蚁会逃走（压狠了会受伤）'],
-          ['按住腿', '（街道上方）原地碾压，左右拖动'],
+          ['按住拖动', '：脚跟着手指走，往下放到地上会压住蚂蚁'],
+          ['继续往下按', '加大压力，过了致死线就踩扁'],
+          ['往上拖', '抬脚，没压死的会逃走（压狠了会受伤）'],
+          ['粘鞋', '：踩扁的可能粘在鞋底，要用力往上拽开'],
         ]
       : [
           ['按住', '屏幕抬脚蓄力，拖动瞄准'],
@@ -1116,6 +1354,7 @@ const ui = {
       ['trash', '补刀清理', s.trash],
       ['heel', '鞋跟暴击', s.heel],
       ['crush', '碾压时长', `${s.crush.toFixed(1)} 秒`],
+      ['stuck', '粘在鞋底', s.stuck || 0],
       [null, '逃走的蚂蚁', g.swarm.escaped],
     ];
     const list = $('stats');
@@ -1217,6 +1456,7 @@ async function boot() {
     // a press/aim in progress was already cancelled by pause(); switch cleanly
     game.cancelPointer();
     game.settings.control = game.settings.control === 'drag' ? 'charge' : 'drag';
+    game.clearSticky();
     game.saveSettings();
     sfx.initAudio();
     sfx.click();

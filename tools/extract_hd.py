@@ -155,6 +155,15 @@ def boot_points(alpha, rgb):
     red = (r > 130) & (g < 70) & (b < 80) & a
     ys, xs = np.nonzero(red)
     sole = [int(xs.mean()), int(ys.mean())] if len(xs) > 400 else None
+    # principal axes of the red sole (where stuck ant smears are painted):
+    # [ux, uy, a, b] = unit major axis, and half-lengths along major/minor
+    sole_axis = None
+    if sole:
+        pts = np.stack([xs - xs.mean(), ys - ys.mean()])
+        evals, evecs = np.linalg.eigh(np.cov(pts))
+        major = evecs[:, 1]
+        a_len, b_len = 2 * np.sqrt(evals[1]), 2 * np.sqrt(evals[0])
+        sole_axis = [round(float(major[0]), 4), round(float(major[1]), 4), int(a_len), int(b_len)]
     # Shaft row: the game stretches this row up to the top of the screen and
     # draws the sprite only from here down, so it must be one solid run of
     # leather. Hand-cut tops are wavy/open, so take the first row whose
@@ -169,7 +178,7 @@ def boot_points(alpha, rgb):
             xs = np.nonzero(alpha[r] > 0.5)[0]
             shaft = [int(xs.min()), int(xs.max()), r]
             break
-    return {"toe": toe, "heel": heel, "sole": sole, "shaft": shaft, "bbox": [x0, x1]}
+    return {"toe": toe, "heel": heel, "sole": sole, "soleAxis": sole_axis, "shaft": shaft, "bbox": [x0, x1]}
 
 
 def face_alpha(rgb):

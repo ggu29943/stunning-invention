@@ -170,3 +170,21 @@ export function click() {
   if (!ready()) return;
   noiseBurst(ctx.currentTime, 0.025, { type: 'highpass', freq: 2500, gain: 0.2 });
 }
+
+/** A sticky strand tearing: a wet stretch then a pop. */
+export function snap() {
+  if (!ready()) return;
+  const t = ctx.currentTime;
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(320 + Math.random() * 120, t);
+  o.frequency.exponentialRampToValueAtTime(90, t + 0.09);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.25, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  o.connect(g).connect(master);
+  o.start(t);
+  o.stop(t + 0.15);
+  noiseBurst(t, 0.05, { type: 'bandpass', freq: 900 + Math.random() * 600, q: 1.5, gain: 0.3 });
+}

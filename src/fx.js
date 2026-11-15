@@ -87,6 +87,23 @@ export class FX {
     }
   }
 
+  /** Sticky goo drops (drag control's glued strands tearing / dripping). */
+  goo(x, y, n, floor) {
+    for (let i = 0; i < n && this.parts.length < MAX_PARTICLES; i++) {
+      this.parts.push({
+        kind: 'goo',
+        x: x + rand(-4, 4),
+        y,
+        vx: rand(-60, 60),
+        vy: rand(-90, 10),
+        life: rand(0.7, 1.2),
+        age: 0,
+        r: rand(1.2, 2.8),
+        floor: floor ?? y + 40,
+      });
+    }
+  }
+
   ring(x, y, rx, ry, color = 'rgba(255,255,255,0.9)', life = 0.35) {
     this.rings.push({ x, y, rx, ry, color, life, age: 0 });
   }
@@ -163,7 +180,7 @@ export class FX {
         p.vy *= Math.pow(0.2, dt);
         p.r += dt * 18;
       } else {
-        p.vy += 520 * dt;
+        p.vy += (p.kind === 'goo' ? 420 : 520) * dt;
         if (p.y > p.floor) {
           p.y = p.floor;
           p.vy *= -0.3;
@@ -227,6 +244,12 @@ export class FX {
         ctx.fillStyle = '#b7a2c8';
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.kind === 'goo') {
+        ctx.globalAlpha = 1 - k * k;
+        ctx.fillStyle = '#2a0710';
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y, p.r, p.r * (p.vy > 20 ? 1.6 : 1), 0, 0, Math.PI * 2);
         ctx.fill();
       } else {
         ctx.globalAlpha = 1 - k * k;
