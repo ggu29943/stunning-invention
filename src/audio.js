@@ -102,30 +102,43 @@ function shapedBurst(t, { attack, decay20, gain, chain }) {
   src.start(t, Math.random() * 0.5, attack + decay20 * 3 + 0.01);
 }
 
+// Tuned by fitting the synthesis to the measured recordings (octave bands,
+// centroid, decay, attack, and the sole's level relative to the heel).
+const HEEL = {
+  level: 1.42, // A-weighted: 3 dB louder than the first "哒" (it sounded a little quiet)
+  hpF: 109.0, pk1F: 179.0, pk1Q: 0.96, pk1G: 5.8, pk2F: 855.0, pk2Q: 1.18, pk2G: 3.81, lpF: 2264.0, lpQ: 0.7,
+  attack: 0.00021, decay20: 0.012,
+  tailF: 736.0, tailLp: 1597.0, tailGain: 0.072, tailDecay: 0.061,
+  edgeHp: 2526.0, edgeLp: 13986.0, edgeGain: 0.11,
+  bodyF: 260, bodyGain: 0.55,
+  soleF: 1109.0, soleQ: 1.4, soleLp: 2999.0, soleGain: 1.025, soleDecay: 0.005,
+};
+
 function heelStrike(t, vol, power) {
-  vol *= 0.84; // as loud (A-weighted) as the version it replaced
+  const H = HEEL;
+  vol *= H.level;
   const v = 1 + (Math.random() - 0.5) * 0.08; // +-4%, so repeats differ
   // the heel tip: the 哒 itself
   shapedBurst(t, {
-    attack: 0.0004,
-    decay20: 0.013,
+    attack: H.attack,
+    decay20: H.decay20,
     gain: 1.3 * vol,
-    chain: [['highpass', 130, 0.6], ['peaking', 380, 0.8, 3.5], ['peaking', 1000 * v, 1.0, 4], ['lowpass', 2300 * v, 0.7]],
+    chain: [['highpass', H.hpF, 0.6], ['peaking', H.pk1F, H.pk1Q, H.pk1G], ['peaking', H.pk2F * v, H.pk2Q, H.pk2G], ['lowpass', H.lpF * v, H.lpQ]],
   });
   // the street answering faintly (buildings either side): a soft, dark tail
-  shapedBurst(t + 0.004, { attack: 0.006, decay20: 0.06, gain: 0.08 * vol, chain: [['bandpass', 800, 0.8], ['lowpass', 2000, 0.7]] });
+  shapedBurst(t + 0.004, { attack: 0.006, decay20: H.tailDecay, gain: H.tailGain * vol, chain: [['bandpass', H.tailF, 0.8], ['lowpass', H.tailLp, 0.7]] });
   // a hard edge on the first millisecond (crisp, never a hiss tail)
-  shapedBurst(t, { attack: 0.0002, decay20: 0.001, gain: 0.16 * vol, chain: [['highpass', 2500, 0.7], ['lowpass', 5500, 0.7]] });
+  shapedBurst(t, { attack: 0.0002, decay20: 0.001, gain: H.edgeGain * vol, chain: [['highpass', H.edgeHp, 0.7], ['lowpass', H.edgeLp, 0.7]] });
   // weight for a hard stomp: a short low-mid body, no sub
   if (power > 0) {
-    shapedBurst(t, { attack: 0.002, decay20: 0.02 + 0.015 * power, gain: 0.55 * power * vol, chain: [['bandpass', 260, 0.9]] });
+    shapedBurst(t, { attack: 0.002, decay20: 0.02 + 0.015 * power, gain: H.bodyGain * power * vol, chain: [['bandpass', H.bodyF, 0.9]] });
   }
-  // the sole touching down after the heel: faint, mid-band
+  // the sole touching down ~100 ms after the heel (real heels: 6-9 dB weaker)
   shapedBurst(t + 0.095 + Math.random() * 0.02, {
     attack: 0.001,
-    decay20: 0.005,
-    gain: 0.22 * vol,
-    chain: [['bandpass', 1400 * v, 1.4], ['lowpass', 3000, 0.7]],
+    decay20: H.soleDecay,
+    gain: H.soleGain * vol,
+    chain: [['bandpass', H.soleF * v, H.soleQ], ['lowpass', H.soleLp, 0.7]],
   });
 }
 
