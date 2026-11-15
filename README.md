@@ -57,7 +57,7 @@ python3 -m http.server 8000
 
 ### 部署到 GitHub Pages
 
-仓库里带了部署流程 `.github/workflows/pages.yml`：每次推送到默认分支，都会用 `tools/build_site.sh` 打包游戏运行需要的文件（约 1MB，不含 `assets/source` 里的原始高清素材和工具脚本），然后发布到 GitHub Pages。
+仓库里带了部署流程 `.github/workflows/pages.yml`：每次推送到默认分支，都会用 `tools/build_site.sh` 打包游戏运行需要的文件（两套外观一共约 1.5MB，不含 `assets/source` 里的原始高清素材和工具脚本），然后发布到 GitHub Pages。
 
 第一次需要在仓库里手动开启一次：**Settings → Pages → Build and deployment → Source 选 “GitHub Actions”**。之后到 **Actions** 页重新运行一次 “Deploy to GitHub Pages”（或者再推送一次）。网址是：
 
@@ -83,8 +83,10 @@ src/hud.js              计时、击杀、压力条、头像、自尊圈
 src/scene.js            程序生成的夜景街道（像素风）
 src/audio.js            WebAudio 合成音效（无音频文件）
 src/stats.js            纪录与本局统计
-assets/source/hd/       原作者提供的高清素材（已抠好透明背景）
-assets/sprites/hd/      游戏用的 WebP 精灵与锚点数据（由脚本生成）
+assets/source/hd/       原作者提供的高清素材：长靴 + 头像（已抠好透明背景）
+assets/source/stockings/ 原作者提供的高清素材：黑丝
+assets/sprites/hd/      长靴的 WebP 精灵与锚点数据，以及头像（由脚本生成）
+assets/sprites/stockings/ 黑丝的 WebP 精灵与锚点数据（由脚本生成）
 tools/extract_hd.py     素材 → 精灵 + 锚点
 ```
 
@@ -103,7 +105,7 @@ tools/extract_hd.py     素材 → 精灵 + 锚点
 
 `tools/extract_hd.py` 负责处理每一套素材（新加一套只要在脚本的 `SKINS` 里加一行）：
 - 裁掉空白，缩到合适大小，转成 WebP（每张约 30 KB）
-- 算出每帧的鞋尖、鞋跟尖、红色鞋底中心和靴筒"拉伸行"，写进 `assets/sprites/hd/sprites.json`
+- 算出每帧的鞋尖、鞋跟尖、红色鞋底中心和靴筒"拉伸行"，写进各自目录下的 `sprites.json`
 
 游戏里用这些锚点决定踩踏范围、落地对齐，以及把腿向上延伸出屏幕。更换素材后重新运行：
 
