@@ -34,7 +34,8 @@ jobs:
         env:
           APK_VERSION_CODE: ${{ github.run_number }}
           APK_UPDATE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apk/
-        run: tools/build_apk.sh
+        # one retry: the build tools' downloads sometimes hit rate limits
+        run: tools/build_apk.sh || { sleep 60; tools/build_apk.sh; }
       - uses: actions/upload-artifact@v4
         with:
           name: apk
@@ -51,11 +52,20 @@ jobs:
       - name: Assemble site (runtime files only)
         run: tools/build_site.sh _site
       - name: Add the Android app
+        id: apk
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           name: apk
           path: _site/apk
+      # the app build failed: keep the app that is online now, so the
+      # download link keeps working
+      - name: Keep the previous Android app
+        if: steps.apk.outcome != 'success'
+        run: |
+          site="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apk"
+          mkdir -p _site/apk
+          curl -fsSL -o _site/apk/version.json "$site/version.json" && curl -fsSL -o _site/apk/heelstomp.apk "$site/heelstomp.apk" || rm -rf _site/apk
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
