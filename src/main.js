@@ -11,8 +11,8 @@ import * as sfx from './audio.js';
 const SETTINGS_KEY = 'heelstomp.settings.v1';
 const TIME_LIMIT = 60;
 const COMBO_WINDOW = 1.6;
-// portrait: the red outfit shows during a combo (连杀: 2+ kills in a row) and
-// for RED_LINGER s after it ends; a new combo before then keeps it red
+// portrait: the red outfit shows during a combo (连杀: 2+ kills in a row) or
+// while ants are pinned under the dragged boot, and for RED_LINGER s after
 const RED_LINGER = 1.5;
 // drag control: pressure zones while the front boot presses on the street.
 // The back leg shifts its weight at BACK_P1 (twist_0) and again at KILL_AT
@@ -698,11 +698,13 @@ class Game {
     this.portraitPulse = Math.max(0, this.portraitPulse - dt * 2.5);
     this.comboPulse = Math.max(0, this.comboPulse - dt * 5);
     this.gainT = Math.max(0, this.gainT - dt);
-    // portrait: cross-fade to the red outfit during a combo, back to the pink
-    // one once no new combo has started for RED_LINGER s after it ended
-    if (this.combo >= 2) this.redHold = RED_LINGER;
+    // portrait: cross-fade to the red outfit during a combo or while the
+    // dragged boot holds ants pinned, back to the pink one once neither has
+    // happened for RED_LINGER s
+    const pinning = this.foot.state === 'follow' && this.press && !this.press.crushed && this.press.pinned.length > 0;
+    if (this.combo >= 2 || pinning) this.redHold = RED_LINGER;
     else this.redHold = Math.max(0, this.redHold - dt);
-    const wantRed = this.combo >= 2 || this.redHold > 0 ? 1 : 0;
+    const wantRed = this.combo >= 2 || pinning || this.redHold > 0 ? 1 : 0;
     this.redMix += clamp(wantRed - this.redMix, -dt * 8, dt * 12);
   }
 
@@ -994,13 +996,12 @@ class Game {
     const foot = this.foot;
     const press = (this.press = this.newPress());
     this.session.stomps++;
-    // the back leg stays put while the boot presses (it is shifting its
-    // weight); it only hops aside if the boot came down right on top of it
-    // (a back leg left far behind steps up beside it, so moving across the
-    // wide street is walking, not a split)
+    // drag control: the back leg only shifts its weight while the boot
+    // presses, and a boot set down on top of it just stands in front of it;
+    // left far behind (more than STANCE_MAX sole lengths) it steps up beside
+    // the boot, so crossing the wide street is walking, not a split
     const b = this.backLeg;
-    const gap = Math.abs(b.x - foot.x);
-    if (b.state === 'planted' && (gap < this.soleLen * 0.7 || gap > this.soleLen * STANCE_MAX)) this.maybeStepBackLeg();
+    if (b.state === 'planted' && Math.abs(b.x - foot.x) > this.soleLen * STANCE_MAX) this.maybeStepBackLeg();
     sfx.heelTap(0.45);
     this.vibrate(8);
     this.fx.dust(foot.x, foot.y, 0, (foot.soleAt() / 165) * 0.5);

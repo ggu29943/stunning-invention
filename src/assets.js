@@ -5,6 +5,10 @@ export const SKINS = {
   stockings: { dir: 'assets/sprites/stockings', label: '黑丝' },
 };
 const FACE_DIR = 'assets/sprites/hd';
+// the deployed site loads this module as assets.js?v=<build>; the sprites get
+// the same tag, so a new deploy never mixes fresh code with cached art
+const VER = new URL(import.meta.url).searchParams.get('v');
+const tag = (url) => (VER ? `${url}?v=${VER}` : url);
 const FRAMES = ['stand_0', 'stand_1', 'twist_0', 'twist_1', 'lift_0', 'lift_1', 'lift_2'];
 const FACES = ['face_green', 'face_red'];
 // pre-tinted copies for the leg that stands further back in the scene
@@ -44,7 +48,7 @@ function darken(img, tint) {
 
 let facesPromise = null;
 function loadFaces() {
-  facesPromise ||= Promise.all(FACES.map((n) => loadImage(`${FACE_DIR}/${n}.webp`))).then((imgs) =>
+  facesPromise ||= Promise.all(FACES.map((n) => loadImage(tag(`${FACE_DIR}/${n}.webp`)))).then((imgs) =>
     Object.fromEntries(FACES.map((n, i) => [n, imgs[i]])),
   );
   return facesPromise;
@@ -57,7 +61,7 @@ export function loadSkin(name, onProgress) {
   const skin = SKINS[name] ? name : 'boots';
   skinCache[skin] ||= (async () => {
     const { dir } = SKINS[skin];
-    const meta = await fetch(`${dir}/sprites.json`).then((r) => {
+    const meta = await fetch(tag(`${dir}/sprites.json`)).then((r) => {
       if (!r.ok) throw new Error(`无法加载 ${dir}/sprites.json`);
       return r.json();
     });
@@ -71,7 +75,7 @@ export function loadSkin(name, onProgress) {
     const total = FRAMES.length + 1;
     await Promise.all([
       ...FRAMES.map(async (f) => {
-        img[f] = await loadImage(`${dir}/${f}.webp`);
+        img[f] = await loadImage(tag(`${dir}/${f}.webp`));
         onProgress?.(++done / total);
       }),
       loadFaces().then((faces) => {

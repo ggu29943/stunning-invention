@@ -79,15 +79,18 @@ export class Swarm {
     const top = g.bandTop + 4;
     const bot = g.bandBot - 2;
     const out = [];
+    // how hard the dragged boot presses on the pinned ants, 0 (just set down)
+    // to 1 (the kill line): they scream and struggle harder as it rises
+    const squeeze = clamp(g.pressure / (g.killAt || 0.7), 0, 1);
     for (const a of this.ants) {
-      a.phase += dt * (a.state === 'panic' || a.state === 'trapped' ? 26 : a.wounded ? 5 : 14);
+      a.phase += dt * (a.state === 'trapped' ? 26 + 34 * squeeze : a.state === 'panic' ? 26 : a.wounded ? 5 : 14);
       if (a.scream > 0) a.scream -= dt;
 
       if (a.state === 'trapped') {
         // pinned under a boot that was set down gently (drag control): it
         // cannot move and keeps screaming until crushed or released
         a.scream = Math.max(a.scream, 0.6);
-        if (Math.random() < dt * 1.5) sfx.squeak();
+        if (Math.random() < dt * (1.5 + 7 * squeeze)) sfx.squeak(squeeze);
         continue;
       }
       if (a.state === 'stun') {
@@ -201,9 +204,12 @@ export function drawAnt(ctx, g, a) {
     ctx.scale(1, -1);
     ctx.translate(0, 3);
   } else if (a.state === 'trapped') {
-    // squashed flatter the harder the boot presses, and wriggling
+    // squashed flatter the harder the boot presses, and wriggling (harder
+    // the harder it presses: wider twists, a shudder)
+    const sq = clamp(g.pressure / (g.killAt || 0.7), 0, 1);
+    ctx.translate((Math.random() - 0.5) * 1.6 * sq, (Math.random() - 0.5) * 0.8 * sq);
     ctx.scale(1 + g.pressure * 0.25, 1 - g.pressure * 0.45);
-    ctx.rotate(Math.sin(a.phase * 1.7) * 0.2);
+    ctx.rotate(Math.sin(a.phase * 1.7) * (0.2 + 0.3 * sq));
   } else if (a.wounded) {
     ctx.rotate(Math.sin(a.phase * 2) * 0.12);
   }
@@ -218,7 +224,8 @@ export function drawAnt(ctx, g, a) {
   for (let i = 0; i < 3; i++) {
     const bx = 2.2 - i * 1.6;
     const ph = i % 2 === 0 ? swing : -swing;
-    const reach = flip || a.state === 'trapped' ? Math.sin(a.phase * 3 + i) * 2 : ph * 1.8;
+    const kick = a.state === 'trapped' ? 2 * (1 + 0.9 * clamp(g.pressure / (g.killAt || 0.7), 0, 1)) : 2;
+    const reach = flip || a.state === 'trapped' ? Math.sin(a.phase * 3 + i) * kick : ph * 1.8;
     if (!(a.wounded && i === 1)) {
       ctx.moveTo(bx, -2.4);
       ctx.lineTo(bx + 1.2 + reach, -1.2);
@@ -276,10 +283,12 @@ export function drawAnt(ctx, g, a) {
     ctx.save();
     ctx.globalAlpha = a.state === 'stun' ? 0.9 : clamp(a.scream * 2, 0, 1);
     ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.round((trapped ? 12 : 9) * s)}px ui-monospace, Menlo, monospace`;
+    // pinned: the cry grows with the pressure (bigger, then !! and !!!)
+    const sq = trapped ? clamp(g.pressure / (g.killAt || 0.7), 0, 1) : 0;
+    ctx.font = `bold ${Math.round((trapped ? 12 + 6 * sq : 9) * s)}px ui-monospace, Menlo, monospace`;
     ctx.textAlign = 'center';
     ctx.fillStyle = a.state === 'stun' ? '#ffe14f' : '#ff3b5c';
-    ctx.fillText(a.state === 'stun' ? '@' : '!', a.x, by);
+    ctx.fillText(a.state === 'stun' ? '@' : sq > 0.75 ? '!!!' : sq > 0.4 ? '!!' : '!', a.x, by);
     ctx.restore();
   }
 }

@@ -156,20 +156,25 @@ export function crunch(count) {
   }
 }
 
-export function squeak() {
+/**
+ * An ant's squeak. `intensity` 0..1 (how hard the boot pinning it presses):
+ * louder, shriller and allowed to come faster as it rises.
+ */
+export function squeak(intensity = 0) {
   if (!ready()) return;
+  const k = Math.max(0, Math.min(1, intensity));
   const t = ctx.currentTime;
-  if (t - lastSqueak < 0.07) return;
+  if (t - lastSqueak < 0.07 - 0.035 * k) return;
   lastSqueak = t;
   const o = ctx.createOscillator();
   o.type = 'triangle';
-  const f0 = 1400 + Math.random() * 900;
+  const f0 = (1400 + Math.random() * 900) * (1 + 0.45 * k);
   o.frequency.setValueAtTime(f0, t);
   o.frequency.exponentialRampToValueAtTime(f0 * (1.3 + Math.random() * 0.4), t + 0.05);
   o.frequency.exponentialRampToValueAtTime(f0 * 0.7, t + 0.12);
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.05, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.05 + 0.11 * k, t + 0.01);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
   o.connect(g).connect(master);
   o.start(t);
