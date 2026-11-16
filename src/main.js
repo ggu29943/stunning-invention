@@ -11,6 +11,9 @@ import * as sfx from './audio.js';
 const SETTINGS_KEY = 'heelstomp.settings.v1';
 const TIME_LIMIT = 60;
 const COMBO_WINDOW = 1.6;
+// portrait: the red outfit shows during a combo (连杀: 2+ kills in a row) and
+// for RED_LINGER s after it ends; a new combo before then keeps it red
+const RED_LINGER = 1.5;
 // drag control: pressure zones while the front boot presses on the street.
 // The back leg shifts its weight at BACK_P1 (twist_0) and again at KILL_AT
 // (twist_1), which is also where the pinned ants are crushed.
@@ -71,7 +74,7 @@ class Game {
     this.comboPulse = 0;
     this.portraitPulse = 0;
     this.redMix = 0;
-    this.moodT = 0;
+    this.redHold = 0;
     this.gain = 0;
     this.gainT = 0;
     this.hitstop = 0;
@@ -239,7 +242,7 @@ class Game {
     this.pressure = 0;
     this.gainT = 0;
     this.redMix = 0;
-    this.moodT = 0;
+    this.redHold = 0;
     this.portraitPulse = 0;
     this.lastLevel = 0;
     this.press = null;
@@ -577,7 +580,6 @@ class Game {
       this.gain = ego;
       this.gainT = 1.6;
       this.portraitPulse = Math.min(1, 0.4 + dead.length * 0.05);
-      if (full || dead.length >= 8) this.moodT = 2.2;
       this.fx.text(fp.x, foot.y - 70, `+${ego}`, { size: 18 + Math.min(18, dead.length), color: full ? '#ff4fa3' : '#ffe14f' });
       if (dead.length >= 2) {
         this.fx.text(fp.x, foot.y - 98, `×${dead.length}`, { size: 14, color: '#fff', life: 0.7 });
@@ -697,10 +699,11 @@ class Game {
     this.portraitPulse = Math.max(0, this.portraitPulse - dt * 2.5);
     this.comboPulse = Math.max(0, this.comboPulse - dt * 5);
     this.gainT = Math.max(0, this.gainT - dt);
-    // portrait mood: cross-fade to the red-eyed face while the pressure is
-    // full and for a moment after a big stomp
-    this.moodT = Math.max(0, this.moodT - dt);
-    const wantRed = (this.state === 'play' && this.pressure >= 1) || this.moodT > 0 ? 1 : 0;
+    // portrait: cross-fade to the red outfit during a combo, back to the pink
+    // one once no new combo has started for RED_LINGER s after it ended
+    if (this.combo >= 2) this.redHold = RED_LINGER;
+    else this.redHold = Math.max(0, this.redHold - dt);
+    const wantRed = this.combo >= 2 || this.redHold > 0 ? 1 : 0;
     this.redMix += clamp(wantRed - this.redMix, -dt * 8, dt * 12);
   }
 
@@ -1176,7 +1179,6 @@ class Game {
     this.fx.shake(6, 0.25);
     // no chime: crushing the ants already made its sound
     this.vibrate([30, 20, 40]);
-    this.moodT = 2.2;
   }
 
   /** Per-press records, ego readout and portrait reaction after kills. */
@@ -1189,7 +1191,6 @@ class Game {
       this.gain = press.ego;
       this.gainT = 1.6;
       this.portraitPulse = Math.min(1, 0.4 + press.kills * 0.05);
-      if (press.kills >= 8) this.moodT = 2.2;
     }
     this.records.check(s);
     this.checkLevel();

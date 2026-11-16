@@ -230,7 +230,7 @@ function drawPortrait(ctx, g, assets) {
   ctx.fillStyle = bg;
   ctx.fill();
   ctx.clip();
-  // green-eyed normally, red-eyed when the pressure is full or after a big stomp
+  // pink outfit normally, red during a combo (and 1.5 s after it ends)
   // drawn a little oversized and low, so the float never shows a gap at the bottom
   const size = fw * 1.09;
   const fx = (fw - size) / 2;
