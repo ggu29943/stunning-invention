@@ -190,14 +190,14 @@ class Game {
           leg.t = falling.t;
         }
       }
-      // the gap between the feet was scaled with the width (a landscape -> portrait
-      // turn leaves the back leg half inside the front boot): restore the stance
+      // the gap between the feet was scaled with the width: if that left the
+      // back leg far behind, bring it up beside the front boot
       const f = this.foot;
       const b = this.backLeg;
       const fx = f.state === 'stomping' ? f.tx : f.x;
       const fy = f.state === 'stomping' ? f.ty : f.y;
       const gap = Math.abs(b.x - fx);
-      if (b.state === 'planted' && (gap < this.soleLen * 0.7 || gap > this.soleLen * STANCE_MAX)) {
+      if (b.state === 'planted' && gap > this.soleLen * STANCE_MAX) {
         const side = b.x >= fx ? 1 : -1;
         let tx = fx + side * this.soleLen * 0.95;
         if (tx < 60 || tx > this.W - 60) tx = fx - side * this.soleLen * 0.95;
@@ -630,13 +630,16 @@ class Game {
     sfx.crunch(dead.length);
   }
 
+  /**
+   * The back leg catches up when the front boot has landed more than
+   * STANCE_MAX sole lengths away. (A boot landing on or right next to it
+   * leaves it where it is: the front boot just stands in front of it.)
+   */
   maybeStepBackLeg() {
     const f = this.foot;
     const b = this.backLeg;
     const gap = b.x - f.x;
-    const far = Math.abs(gap) > this.soleLen * STANCE_MAX;
-    const close = Math.abs(gap) < this.soleLen * 0.7;
-    if (!far && !close) return;
+    if (Math.abs(gap) <= this.soleLen * STANCE_MAX) return;
     let side = gap >= 0 ? 1 : -1;
     const step = this.soleLen * 0.95;
     let tx = f.x + side * step;
