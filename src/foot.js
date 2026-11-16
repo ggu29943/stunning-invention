@@ -166,14 +166,15 @@ export class Leg {
    * an accidental grind.
    */
   hitBox() {
-    // the drawn leg (shaft of stand_0) plus some finger slop
+    // the drawn leg where it shows above the street (stand_0) plus some finger slop
     const m = this.meta.stand_0;
     const s = this.frameScale('stand_0');
     const ax = (m.toe[0] + m.heel[0]) / 2;
     const pad = this.soleAt() * 0.15;
+    const [lx0, lx1] = m.leg || m.shaft;
     return {
-      x0: this.x + (m.shaft[0] - ax) * s - pad,
-      x1: this.x + (m.shaft[1] - ax) * s + pad,
+      x0: this.x + (lx0 - ax) * s - pad,
+      x1: this.x + (lx1 - ax) * s + pad,
       y0: 0,
       y1: this.game.bandTop - 4,
     };

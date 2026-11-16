@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn the storyboard images in assets/source/hd/*.png into game sprites
+"""Turn the full-leg source images (assets/source/<skin>/NN_*.png) into game sprites
 (assets/sprites/hd/<name>.webp) plus landmark metadata (sprites.json).
 
 The sources are hand-cut PNGs with transparency, and their alpha is used as is.
@@ -51,7 +51,13 @@ FRAMES = {
 }
 FACES = {"12_green_portrait": "face_green", "13_red_portrait": "face_red"}
 
-BOOT_SCALE = 0.62     # output size relative to the 1254px source
+# The sources show the whole leg. Each skin is scaled so the standing pose's
+# sole (toe to heel tip) is TARGET_SPAN sprite px, the same as the earlier
+# knee-high art (so the foot keeps its sharpness), and every sprite is cut
+# CROP_SPANS sole lengths above its lowest point: more of the leg than can
+# ever be on screen (about 2.6), without carrying the whole thigh around.
+TARGET_SPAN = 355
+CROP_SPANS = 3.0
 FACE_SIZE = 320
 INK = 22              # max-channel value that counts as visible ink
 
@@ -134,8 +140,9 @@ def boot_mask(rgb):
     return np.clip((alpha - 0.5) * 2.2 + 0.5, 0, 1)
 
 
-def boot_points(alpha, rgb):
-    """Landmarks in output-sprite pixels (see src/foot.js)."""
+def boot_points(alpha, rgb, foot_h=None):
+    """Landmarks in output-sprite pixels (see src/foot.js). foot_h: height of
+    the foot part above the lowest point (default 35% of the silhouette)."""
     a = alpha > 0.5
     h, w = a.shape
     bottoms = np.full(w, -1)
@@ -189,14 +196,22 @@ def boot_points(alpha, rgb):
             xs = np.nonzero(alpha[r] > 0.5)[0]
             shaft = [int(xs.min()), int(xs.max()), r]
             break
-    # centre of the foot part (bottom 35% of the silhouette): drag control
+    # centre of the foot part (the bottom of the silhouette): drag control
     # anchors every lifted pose here so switching poses never jumps sideways
     rows = np.nonzero(a.any(axis=1))[0]
     low = a.copy()
-    low[: int(rows.max() - (rows.max() - rows.min()) * 0.35)] = False
+    fh = foot_h if foot_h else (rows.max() - rows.min()) * 0.35
+    low[: int(rows.max() - fh)] = False
     fy, fx = np.nonzero(low)
     footc = [int(fx.mean()), int(fy.mean())]
-    return {"toe": toe, "heel": heel, "sole": sole, "soleAxis": sole_axis, "footc": footc, "shaft": shaft, "bbox": [x0, x1]}
+    # horizontal extent of the leg where it shows above the street (half a
+    # sole to 2.5 soles above the lowest point): the stomp control's grind
+    # hot-spot covers it
+    span = foot_h / 0.7 if foot_h else (rows.max() - rows.min()) * 0.5
+    band = a[max(0, int(rows.max() - 2.5 * span)): int(rows.max() - 0.5 * span)]
+    cx = np.nonzero(band.any(axis=0))[0]
+    leg = [int(cx.min()), int(cx.max())] if len(cx) else [x0, x1]
+    return {"toe": toe, "heel": heel, "sole": sole, "soleAxis": sole_axis, "footc": footc, "shaft": shaft, "leg": leg, "bbox": [x0, x1]}
 
 
 def face_alpha(rgb):
@@ -228,26 +243,43 @@ def clean_alpha(alpha):
     return np.where(keep, alpha, 0.0)
 
 
+def load_cut(path):
+    """Source RGBA cropped to the silhouette (alpha cleaned of stray specks)."""
+    im0 = Image.open(path)
+    rgb = np.asarray(im0.convert("RGB"))
+    # hand-cut sources carry their own alpha; otherwise rebuild it
+    alpha = (np.asarray(im0.getchannel("A")).astype(float) / 255
+             if im0.mode == "RGBA" else boot_mask(rgb))
+    alpha = clean_alpha(alpha)
+    ys, xs = np.nonzero(alpha > 0.02)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    return np.dstack([np.maximum(rgb, 5), (alpha * 255).astype(np.uint8)])[y0:y1, x0:x1]
+
+
 def process_skin(name, cfg, previews):
     os.makedirs(cfg["out"], exist_ok=True)
     meta = {}
+    src = lambda num: os.path.join(cfg["src"], f"{num}_{cfg['suffix']}.png")
+    # one scale per skin, from the standing pose's sole (the art is drawn at
+    # one scale throughout)
+    ref = load_cut(src("02"))
+    p = boot_points(ref[:, :, 3] / 255.0, ref[:, :, :3])
+    scale = TARGET_SPAN / max(1, p["heel"][0] - p["toe"][0])
+    print(name, "scale", round(scale, 3))
     for num, frame in FRAMES.items():
-        path = os.path.join(cfg["src"], f"{num}_{cfg['suffix']}.png")
-        im0 = Image.open(path)
-        rgb = np.asarray(im0.convert("RGB"))
-        # hand-cut sources carry their own alpha; otherwise rebuild it
-        alpha = (np.asarray(im0.getchannel("A")).astype(float) / 255
-                 if im0.mode == "RGBA" else boot_mask(rgb))
-        alpha = clean_alpha(alpha)
-        ys, xs = np.nonzero(alpha > 0.02)
-        y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
-        rgba = np.dstack([np.maximum(rgb, 5), (alpha * 255).astype(np.uint8)])[y0:y1, x0:x1]
+        rgba = load_cut(src(num))
         im = Image.fromarray(rgba, "RGBA")
-        im = im.resize((round(im.width * BOOT_SCALE), round(im.height * BOOT_SCALE)), Image.LANCZOS)
+        im = im.resize((round(im.width * scale), round(im.height * scale)), Image.LANCZOS)
         arr = np.asarray(im)
+        # keep CROP_SPANS sole lengths of leg above the lowest point
+        top = max(0, arr.shape[0] - int(CROP_SPANS * TARGET_SPAN))
+        arr = arr[top:]
+        cols = np.nonzero((arr[:, :, 3] > 5).any(axis=0))[0]
+        arr = np.ascontiguousarray(arr[:, cols.min():cols.max() + 1])
+        im = Image.fromarray(arr, "RGBA")
         save_webp(arr, os.path.join(cfg["out"], f"{frame}.webp"))
         m = {"w": im.width, "h": im.height, "src": f"{num}_{cfg['suffix']}"}
-        m.update(boot_points(arr[:, :, 3] / 255.0, arr[:, :, :3]))
+        m.update(boot_points(arr[:, :, 3] / 255.0, arr[:, :, :3], foot_h=0.7 * TARGET_SPAN))
         meta[frame] = m
         previews.append((f"{name}:{frame}", im))
         print(name, frame, {k: m[k] for k in ("w", "h", "toe", "heel", "shaft", "footc")})
