@@ -20,12 +20,11 @@ const RED_LINGER = 1.5;
 export const BACK_P1 = 0.35;
 export const KILL_AT = 0.7;
 const LIFT_HYST = 5; // px the sole must rise before a pressed boot counts as lifted
-// Landscape: the street is far wider than a stride, so the legs must not end
-// up in a split. With the 跨度限制 setting on, a raised foot reaches at most
+// The street is far wider than a stride, so the legs must not end up in a
+// split. With the 跨度限制 setting on, a raised foot reaches at most
 // SPREAD_MAX sole lengths from the standing one (3.5: an iPad's whole street
 // is still in reach); either way the back leg catches up (steps beside the
 // front boot) once the feet are more than STANCE_MAX sole lengths apart.
-// Portrait is narrow enough that this never comes up, so it is left as it was.
 const SPREAD_MAX = 3.5;
 const STANCE_MAX = 1.35;
 // drag control: a pressed boot only starts to grind once the finger has
@@ -40,6 +39,8 @@ const MAX_STRANDS = 12;
 const MAX_SMEARS = 22;
 
 const $ = (id) => document.getElementById(id);
+// landscape only: a phone or tablet held upright shows the #rotate screen (CSS)
+const UPRIGHT = window.matchMedia ? window.matchMedia('(orientation: portrait) and (pointer: coarse)') : null;
 
 class Game {
   constructor(canvas, assets) {
@@ -143,14 +144,10 @@ class Game {
     this.cssW = cssW;
     this.cssH = cssH;
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.portrait = cssH > cssW;
-    if (this.portrait) {
-      this.W = 540;
-      this.H = clamp(Math.round((540 * cssH) / cssW), 760, 1300);
-    } else {
-      this.H = 540;
-      this.W = clamp(Math.round((540 * cssW) / cssH), 720, 1400);
-    }
+    // landscape only: a portrait phone gets the "turn it sideways" screen
+    // (index.html #rotate); a tall desktop window shows the 4:3 game letterboxed
+    this.H = 540;
+    this.W = clamp(Math.round((540 * cssW) / cssH), 720, 1400);
     this.scale = Math.min(cssW / this.W, cssH / this.H);
     this.offX = (cssW - this.W * this.scale) / 2;
     this.offY = (cssH - this.H * this.scale) / 2;
@@ -160,10 +157,10 @@ class Game {
     this.canvas.style.width = `${cssW}px`;
     this.canvas.style.height = `${cssH}px`;
 
-    this.bandBot = this.H - (this.portrait ? 70 : 34);
-    this.bandTop = this.bandBot - (this.portrait ? 150 : 112);
+    this.bandBot = this.H - 34;
+    this.bandTop = this.bandBot - 112;
     // on-screen sole length of a planted boot (sets how big the boots are)
-    this.soleLen = this.portrait ? 165 : 205;
+    this.soleLen = 205;
     this.walkTop = this.bandTop - 30;
     this.scene = buildScene(this.W, this.H, { walkTop: this.walkTop, bandTop: this.bandTop, bandBot: this.bandBot });
     this.fx.resize(this.W, this.H, this.walkTop);
@@ -224,7 +221,7 @@ class Game {
 
   placeLegs() {
     const y = this.bandTop + (this.bandBot - this.bandTop) * 0.75;
-    this.foot.place(this.W * (this.portrait ? 0.4 : 0.45), y);
+    this.foot.place(this.W * 0.45, y);
     this.backLeg.place(this.foot.x + this.soleLen * 0.95, y - 30);
   }
 
@@ -341,12 +338,12 @@ class Game {
 
   /**
    * Where a raised (or sliding) front foot may go along the street: inside
-   * the screen and, in landscape, within a stride of the standing back leg.
+   * the screen and (跨度限制 on) within a stride of the standing back leg.
    */
   reachX(x) {
     let lo = 40;
     let hi = this.W - 40;
-    if (!this.portrait && this.settings.spreadLimit) {
+    if (this.settings.spreadLimit) {
       const b = this.backLeg;
       const bx = b.state === 'stepping' ? b.tx : b.x;
       const r = this.soleLen * this.spreadMax;
@@ -668,6 +665,8 @@ class Game {
     requestAnimationFrame((t) => this.frame(t));
     const dt = Math.min(0.05, Math.max(0, (now - this.last) / 1000));
     this.last = now;
+    // held upright the rotate screen covers everything: draw nothing
+    if (UPRIGHT && UPRIGHT.matches) return;
     this.time += dt;
     if (this.state === 'play') {
       if (this.hitstop > 0) {
@@ -1022,11 +1021,11 @@ class Game {
     this.session.stomps++;
     // the back leg stays put while the boot presses (it is shifting its
     // weight); it only hops aside if the boot came down right on top of it
-    // (landscape: a back leg left far behind steps up beside it, so moving
-    // across the wide street is walking, not a split)
+    // (a back leg left far behind steps up beside it, so moving across the
+    // wide street is walking, not a split)
     const b = this.backLeg;
     const gap = Math.abs(b.x - foot.x);
-    if (b.state === 'planted' && (gap < this.soleLen * 0.7 || (!this.portrait && gap > this.soleLen * STANCE_MAX))) this.maybeStepBackLeg();
+    if (b.state === 'planted' && (gap < this.soleLen * 0.7 || gap > this.soleLen * STANCE_MAX)) this.maybeStepBackLeg();
     sfx.heelTap(0.45);
     this.vibrate(8);
     this.fx.dust(foot.x, foot.y, 0, (foot.soleAt() / 165) * 0.5);
@@ -1777,6 +1776,16 @@ async function boot() {
   $('btn-menu').addEventListener('click', () => game.toMenu());
   $('btn-again').addEventListener('click', () => game.start(game.mode));
   $('btn-menu2').addEventListener('click', () => game.toMenu());
+
+  // turning the phone upright mid-round pauses it (the rotate screen covers
+  // the game); turned back, the pause menu is waiting
+  if (UPRIGHT) {
+    const onUpright = () => {
+      if (UPRIGHT.matches && game.state === 'play') game.pause();
+    };
+    if (UPRIGHT.addEventListener) UPRIGHT.addEventListener('change', onUpright);
+    else if (UPRIGHT.addListener) UPRIGHT.addListener(onUpright);
+  }
 
   ui.refreshMenu(game);
   ui.show('menu');

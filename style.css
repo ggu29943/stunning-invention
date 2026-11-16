@@ -318,3 +318,50 @@ button.primary.alt {
 @media (max-height: 300px) and (orientation: landscape) {
   #settings .hint { display: none; }
 }
+
+/* landscape only: a phone or tablet held upright gets this screen instead
+   (the round in progress is paused) */
+#rotate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+  text-align: center;
+  touch-action: none;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate { display: grid; }
+}
+
+.rotate-phone {
+  color: var(--pink);
+  animation: rotate-turn 2.4s ease-in-out infinite;
+}
+
+@keyframes rotate-turn {
+  0%, 25% { transform: rotate(0deg); }
+  55%, 85% { transform: rotate(-90deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-phone { animation: none; transform: rotate(-90deg); }
+}
+
+.rotate-title {
+  margin: 18px 0 6px;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+  text-shadow: 3px 3px 0 #3a0a20, 0 0 18px rgba(255, 79, 163, 0.55);
+}
+
+.rotate-sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
