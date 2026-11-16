@@ -919,7 +919,7 @@ class Game {
       // on the street (finger jitter near the kerb does not count as a lift).
       // The pressed boot stays put until the finger deliberately drags
       // sideways; then it slides slowly after the finger -- a grind, like the
-      // stomp control's -- never into the back leg. Pressure follows the depth.
+      // stomp control's. Pressure follows the depth.
       const sl = this.slide;
       if (!sl.on && Math.abs(t.fx - sl.from) >= GRIND_START) {
         sl.on = true;
@@ -927,19 +927,11 @@ class Game {
         foot.grindingT = GRIND_HOLD;
       }
       if (sl.on) {
+        // the pressed boot slides slowly after the finger; it passes in front
+        // of the back leg (which stands further back) instead of stopping at
+        // it, so grinding never catches, not even at the screen's edge
         const maxStep = 140 * dt;
-        let nx = foot.x + clamp(t.x - foot.x, -maxStep, maxStep);
-        const b = this.backLeg;
-        const keep = this.soleLen * 0.75;
-        if (b.state === 'planted' && Math.abs(nx - b.x) < Math.abs(foot.x - b.x)) {
-          // sliding toward the back leg: just before the boot would bump into
-          // it, if the finger pushes on, the back leg steps around to the
-          // other side (the pressed boot carries the weight) so the slide never
-          // stalls; otherwise the boot stops beside it
-          if (Math.abs(nx - b.x) < keep + this.soleLen * 0.1) this.stepAround(t.fx);
-          if (b.state === 'planted' && Math.abs(nx - b.x) < keep) nx = foot.x;
-        }
-        foot.x = nx;
+        foot.x += clamp(t.x - foot.x, -maxStep, maxStep);
         if (Math.abs(foot.x - sl.ref) >= GRIND_STEP) {
           foot.grindingT = GRIND_HOLD;
           sl.ref = foot.x;
@@ -995,23 +987,6 @@ class Game {
     sfx.heelTap(0.45);
     this.vibrate(8);
     this.fx.dust(foot.x, foot.y, 0, (foot.soleAt() / 165) * 0.5);
-  }
-
-  /**
-   * Drag control: the pressed boot is sliding up to the back leg and the
-   * finger keeps pushing on toward targetX, so the back leg steps around to
-   * the other side of the front boot (no waiting for the finger to get past
-   * it). Returns whether it did.
-   */
-  stepAround(targetX) {
-    const f = this.foot;
-    const b = this.backLeg;
-    const side = b.x >= f.x ? 1 : -1; // the back leg's side now
-    if ((targetX - f.x) * side < 6) return false; // the finger is not pushing on
-    const tx = clamp(f.x - side * this.soleLen * 0.95, 60, this.W - 60);
-    if (Math.abs(tx - f.x) < this.soleLen * 0.7) return false; // no room on the other side
-    b.stepTo(tx, clamp(f.y - 30, this.bandTop + 16, this.bandBot - 10));
-    return true;
   }
 
   /** The dragged boot reached the street: ants under it are pinned, alive. */
