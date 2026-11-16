@@ -8,6 +8,12 @@
   --red: #ff2350;
   --gold: #ffe14f;
   --font: ui-monospace, "SF Mono", Menlo, Consolas, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", monospace;
+  /* safe area: what the browser reports, or what the Android app passes in
+     (--app-inset-*: its WebView may not report the camera cutout itself) */
+  --safe-t: max(env(safe-area-inset-top, 0px), var(--app-inset-top, 0px));
+  --safe-r: max(env(safe-area-inset-right, 0px), var(--app-inset-right, 0px));
+  --safe-b: max(env(safe-area-inset-bottom, 0px), var(--app-inset-bottom, 0px));
+  --safe-l: max(env(safe-area-inset-left, 0px), var(--app-inset-left, 0px));
 }
 
 * { box-sizing: border-box; }
@@ -39,7 +45,7 @@ html, body {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  padding: max(16px, var(--safe-t)) max(16px, var(--safe-r)) max(16px, var(--safe-b)) max(16px, var(--safe-l));
   background: rgba(7, 3, 11, 0.45);
   overflow-y: auto;
   touch-action: pan-y;
@@ -245,7 +251,7 @@ button.primary.alt {
 
 /* landscape phones with the browser toolbar showing (~260-320 px tall) */
 @media (max-height: 320px) {
-  .overlay { padding-top: max(6px, env(safe-area-inset-top)); padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+  .overlay { padding-top: max(6px, var(--safe-t)); padding-bottom: max(6px, var(--safe-b)); }
   .card { padding: 8px 14px 8px; }
   h2 { font-size: 22px; margin-bottom: 6px; }
   h1 { font-size: 22px; }

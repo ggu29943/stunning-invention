@@ -40,6 +40,9 @@ const MAX_SMEARS = 22;
 
 const $ = (id) => document.getElementById(id);
 // landscape only: a phone or tablet held upright shows the #rotate screen (CSS)
+// running inside the Android app (android/: a full-screen WebView that serves
+// the bundled game from this reserved host)
+const IN_APP = location.hostname === 'appassets.androidplatform.net';
 const UPRIGHT = window.matchMedia ? window.matchMedia('(orientation: portrait) and (pointer: coarse)') : null;
 
 class Game {
@@ -95,11 +98,13 @@ class Game {
     // squashed onto the sole (smears)
     this.sticky = { strands: [], smears: [], anchorX: 0 };
 
-    // env(safe-area-inset-*) resolved on a real property, so every engine returns px
+    // the safe-area insets (--safe-* in style.css: the browser's env() values,
+    // or the ones the Android app passes in) resolved on a real property, so
+    // every engine returns px
     this.insetProbe = document.createElement('div');
     this.insetProbe.style.cssText =
       'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
-      'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+      'padding:var(--safe-t,0px) var(--safe-r,0px) var(--safe-b,0px) var(--safe-l,0px)';
     document.body.appendChild(this.insetProbe);
     this.layout();
     this.placeLegs();
@@ -1537,7 +1542,8 @@ const ui = {
     $('btn-vibrate').setAttribute('aria-pressed', String(g.settings.vibrate));
     $('btn-vibrate').textContent = g.settings.vibrate ? '震动：开' : '震动：关';
     this.refreshControl(g);
-    const fsOk = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    // the Android app is always full screen
+    const fsOk = !IN_APP && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
     $('btn-fs').hidden = !fsOk;
   },
   /** Control-mode button labels and the matching how-to lines. */
@@ -1765,6 +1771,21 @@ async function boot() {
     if (UPRIGHT.addEventListener) UPRIGHT.addEventListener('change', onUpright);
     else if (UPRIGHT.addListener) UPRIGHT.addListener(onUpright);
   }
+
+  // the Android app's back button: closes 设置, pauses / resumes a round,
+  // leaves the results card. Returns false on the main menu, where the app
+  // goes to the background as usual.
+  window.heelstompBack = () => {
+    if (ui.settingsOpen()) {
+      ui.closeSettings(game);
+      return true;
+    }
+    if (game.state === 'play') game.pause();
+    else if (game.state === 'pause') game.resume();
+    else if (game.state === 'over') game.toMenu();
+    else return false;
+    return true;
+  };
 
   ui.refreshMenu(game);
   ui.show('menu');

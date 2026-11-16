@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+}
+
+// set by tools/build_apk.sh (and CI): -P<name>=... or an environment variable
+def setting = { String name, String fallback ->
+    def v = project.findProperty(name) ?: System.getenv(name)
+    return v ? v.toString() : fallback
+}
+
+android {
+    namespace = 'com.heelstomp.app'
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = 'com.heelstomp.app'
+        minSdk = 24
+        targetSdk = 35
+        versionCode = setting('APK_VERSION_CODE', '1').toInteger()
+        versionName = setting('APK_VERSION_NAME', 'dev')
+        // folder on the game's web site with version.json + heelstomp.apk
+        // (empty: no update check)
+        buildConfigField 'String', 'UPDATE_URL', "\"${setting('APK_UPDATE_URL', '')}\""
+        // true only for the emulator check (.github/workflows/android-check.yml):
+        // lets it inspect the page over adb
+        buildConfigField 'boolean', 'WEB_DEBUG', setting('APK_WEB_DEBUG', 'false') == 'true' ? 'true' : 'false'
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    // One fixed key, kept in the repository, so every new build installs over
+    // the previous one (Android refuses an update signed with another key).
+    signingConfigs {
+        release {
+            storeFile = rootProject.file('heelstomp.keystore')
+            storePassword = 'heelstomp'
+            keyAlias = 'heelstomp'
+            keyPassword = 'heelstomp'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            signingConfig = signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    lint {
+        // sideloaded app: Play Store target-SDK rules don't apply
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+}

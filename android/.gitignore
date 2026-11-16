@@ -1,0 +1,5 @@
+.gradle/
+build/
+local.properties
+# filled by tools/build_apk.sh from the web game (tools/build_site.sh)
+app/src/main/assets/www/
