@@ -597,7 +597,7 @@ class Game {
     this.fx.shake(3 + 9 * p + Math.min(5, dead.length * 0.15), 0.18 + p * 0.2);
     sfx.stomp(p);
     sfx.crunch(dead.length);
-    if (full) sfx.ding(false);
+    // (no extra chime for a full stomp: the stomp and the crunch already say it)
     this.vibrate(full ? [35, 25, 45] : Math.round(12 + 25 * p));
 
     this.records.check(s);
@@ -929,11 +929,13 @@ class Game {
         let nx = foot.x + clamp(t.x - foot.x, -maxStep, maxStep);
         const b = this.backLeg;
         const keep = this.soleLen * 0.75;
-        if (b.state === 'planted' && Math.abs(nx - b.x) < keep && Math.abs(nx - b.x) < Math.abs(foot.x - b.x)) {
-          // sliding into the back leg: if the finger is past it, the back leg
-          // steps around to the other side (the pressed boot carries the
-          // weight) and the slide goes on; otherwise the boot stops beside it
-          if (!this.stepAround(t.fx)) nx = foot.x;
+        if (b.state === 'planted' && Math.abs(nx - b.x) < Math.abs(foot.x - b.x)) {
+          // sliding toward the back leg: just before the boot would bump into
+          // it, if the finger pushes on, the back leg steps around to the
+          // other side (the pressed boot carries the weight) so the slide never
+          // stalls; otherwise the boot stops beside it
+          if (Math.abs(nx - b.x) < keep + this.soleLen * 0.1) this.stepAround(t.fx);
+          if (b.state === 'planted' && Math.abs(nx - b.x) < keep) nx = foot.x;
         }
         foot.x = nx;
         if (Math.abs(foot.x - sl.ref) >= GRIND_STEP) {
@@ -962,8 +964,12 @@ class Game {
     const isDown = foot.h <= 0.01;
 
     if (!steering) {
-      // finger gone: once back on the street the boot simply stands
-      if (isDown) this.endFollow();
+      // finger gone: the boot settles back down and simply stands; landing
+      // makes the same heel sound as setting it down by hand
+      if (isDown) {
+        if (!wasDown) this.settleLanding();
+        this.endFollow();
+      }
       return;
     }
     if (!wasDown && isDown) {
@@ -981,16 +987,25 @@ class Game {
     if (isDown) this.pressing(dt);
   }
 
+  /** Drag control: a boot let go in the air has settled onto the street. */
+  settleLanding() {
+    const foot = this.foot;
+    sfx.heelTap(0.45);
+    this.vibrate(8);
+    this.fx.dust(foot.x, foot.y, 0, (foot.soleAt() / 165) * 0.5);
+  }
+
   /**
-   * Drag control: the pressed boot is being pushed past the back leg toward
-   * targetX. If the finger really is past it, the back leg steps around to
-   * the other side of the front boot. Returns whether it did.
+   * Drag control: the pressed boot is sliding up to the back leg and the
+   * finger keeps pushing on toward targetX, so the back leg steps around to
+   * the other side of the front boot (no waiting for the finger to get past
+   * it). Returns whether it did.
    */
   stepAround(targetX) {
     const f = this.foot;
     const b = this.backLeg;
     const side = b.x >= f.x ? 1 : -1; // the back leg's side now
-    if ((targetX - b.x) * side < this.soleLen * 0.2) return false; // finger not past it
+    if ((targetX - f.x) * side < 6) return false; // the finger is not pushing on
     const tx = clamp(f.x - side * this.soleLen * 0.95, 60, this.W - 60);
     if (Math.abs(tx - f.x) < this.soleLen * 0.7) return false; // no room on the other side
     b.stepTo(tx, clamp(f.y - 30, this.bandTop + 16, this.bandBot - 10));
@@ -1138,7 +1153,9 @@ class Game {
     }
     this.fx.ring(fp.x, fp.y, fp.rx * 1.1, fp.ry * 1.1, 'rgba(255,255,255,0.6)', 0.3);
     this.fx.shake(2.5 + Math.min(4, dead.length * 0.2), 0.2);
-    sfx.crunch(Math.max(3, dead.length));
+    // only ants dying make a sound; crossing the kill line on an empty
+    // street is silent
+    if (dead.length) sfx.crunch(dead.length);
     this.vibrate(dead.length ? 30 : 12);
     this.notePress();
   }
@@ -1157,7 +1174,7 @@ class Game {
     this.fx.flash = 0.25;
     this.hitstop = 0.05;
     this.fx.shake(6, 0.25);
-    sfx.ding(false);
+    // no chime: crushing the ants already made its sound
     this.vibrate([30, 20, 40]);
     this.moodT = 2.2;
   }
