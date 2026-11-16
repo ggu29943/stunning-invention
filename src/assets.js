@@ -48,7 +48,9 @@ function darken(img, tint) {
 
 let facesPromise = null;
 function loadFaces() {
-  facesPromise ||= Promise.all(FACES.map((n) => loadImage(tag(`${FACE_DIR}/${n}.webp`)))).then((imgs) =>
+  // spelled out (not the logical-assignment operator): older Android WebViews,
+  // before Chromium 85, reject that syntax
+  facesPromise = facesPromise || Promise.all(FACES.map((n) => loadImage(tag(`${FACE_DIR}/${n}.webp`)))).then((imgs) =>
     Object.fromEntries(FACES.map((n, i) => [n, imgs[i]])),
   );
   return facesPromise;
@@ -59,7 +61,7 @@ const skinCache = {};
 /** Load one skin: { name, img (poses + portraits), dark, meta }. Cached. */
 export function loadSkin(name, onProgress) {
   const skin = SKINS[name] ? name : 'boots';
-  skinCache[skin] ||= (async () => {
+  skinCache[skin] = skinCache[skin] || (async () => {
     const { dir } = SKINS[skin];
     const meta = await fetch(tag(`${dir}/sprites.json`)).then((r) => {
       if (!r.ok) throw new Error(`无法加载 ${dir}/sprites.json`);

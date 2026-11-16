@@ -167,6 +167,9 @@ def main():
                           [('android', 'ro.build.version.release'), ('sdk', 'ro.build.version.sdk'),
                            ('model', 'ro.product.model')]}
         info['display'] = adb('shell', 'wm', 'size').strip() + ' / ' + adb('shell', 'wm', 'density').strip()
+        # the system's one-time "Viewing full screen / Got it" panel would cover
+        # the game and hold its drawing; a real phone shows it once per app
+        adb('shell', 'settings', 'put', 'secure', 'immersive_mode_confirmations', 'confirmed', check=False)
         adb('install', '-r', args.apk, timeout=300)
         adb('logcat', '-c', check=False)
         t0 = time.time()

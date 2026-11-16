@@ -58,8 +58,8 @@ public class MainActivity extends Activity {
     static final String HOST = "appassets.androidplatform.net";
     private static final String START_URL = "https://" + HOST + "/index.html";
     private static final int BG = 0xFF07030B;
-    /** Oldest WebView the game runs on (Chromium 87: CSS inset, ||= in JS). */
-    private static final int MIN_CHROMIUM = 87;
+    /** Oldest WebView the game runs on: Chromium 80 (?. and ?? in the JS); checked on 83. */
+    private static final int MIN_CHROMIUM = 80;
 
     private static final Map<String, String> MIME = new HashMap<>();
 
