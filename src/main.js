@@ -1200,13 +1200,27 @@ class Game {
     const foot = this.foot;
     const half = foot.soleAt() * 0.4;
     let stuck = false;
+    const frac = clamp((a.x - foot.x) / half, -1, 1);
+    // where the squashed ant sits on the red sole, in the sole's own frame
+    // (u along it, v across): on the side of the sole above where it died, so
+    // its strand hangs about straight down. The lifted poses' sole axes point
+    // left (negative x), hence the sign flip.
+    const su = clamp(-frac * 0.85, -0.9, 0.9);
+    const sv = rand(-0.45, 0.45);
+    if (st.smears.length < MAX_SMEARS) {
+      st.smears.push({ u: su, v: sv, r: rand(5, 9), life: rand(7, 11), seed: rand(0, 6) });
+      stuck = true;
+    }
     if (st.strands.length < MAX_STRANDS) {
       // the goo joins the sole to the street right under it (whatever depth
-      // the ant died at), so a fresh strand starts unstretched
+      // the ant died at), so a fresh strand starts unstretched; once the boot
+      // is lifted it is pulled out of that squashed ant on the sole
       st.strands.push({
         gx: clamp(a.x, foot.x - half, foot.x + half),
         gy: foot.y + rand(-5, 5),
-        frac: clamp((a.x - foot.x) / half, -1, 1),
+        frac,
+        su,
+        sv,
         // shorter than the held boot can rise (0.42 of the reach), so pulling
         // straight up always tears it in the end
         maxLen: Math.min(rand(45, 100) * (this.soleLen / 205), foot.hMaxAt(this.dragY()) * 0.42 - 6),
@@ -1214,10 +1228,6 @@ class Game {
         wob: rand(0, 6),
       });
       st.anchorX = foot.x;
-      stuck = true;
-    }
-    if (st.smears.length < MAX_SMEARS) {
-      st.smears.push({ u: rand(-0.9, 0.9), v: rand(-0.8, 0.8), r: rand(5, 9), life: rand(7, 11), seed: rand(0, 6) });
       stuck = true;
     }
     if (stuck) this.session.stuck = (this.session.stuck || 0) + 1;
@@ -1248,7 +1258,7 @@ class Game {
     for (const sd of st.strands) {
       const [px, py] = this.strandTop(sd);
       if (Math.hypot(px - sd.gx, py - sd.gy) > sd.maxLen) {
-        const [ax, ay] = foot.underside(sd.frac);
+        const [ax, ay] = foot.underside(sd.frac, sd);
         this.snap(sd, ax, ay, true);
       } else keep.push(sd);
     }
@@ -1276,7 +1286,7 @@ class Game {
   snapAll() {
     const st = this.sticky;
     for (const sd of st.strands) {
-      const [ax, ay] = this.foot.underside(sd.frac);
+      const [ax, ay] = this.foot.underside(sd.frac, sd);
       this.snap(sd, ax, ay, false);
     }
     if (st.strands.length) sfx.snap();
@@ -1301,7 +1311,7 @@ class Game {
       if (len < 3) continue;
       const k = clamp(len / sd.maxLen, 0, 1);
       // but it is drawn from the sole itself
-      const [ax, ay] = this.foot.underside(sd.frac);
+      const [ax, ay] = this.foot.underside(sd.frac, sd);
       const sag = Math.sin(this.time * 3 + sd.wob) * 3 * (1 - k);
       const mx = (ax + sd.gx) / 2 + sag;
       const my = (ay + sd.gy) / 2;
@@ -1460,11 +1470,11 @@ class Game {
     }
     // Sticky strands hang under the front boot, at its depth: always in front
     // of the back leg (it stands further back) and of the ants behind them,
-    // behind the ants in front. Pressed or in the lowest zone they are behind
-    // the front boot itself; once the raised boot is in the 2nd or 3rd zone
-    // its red sole faces the camera, so they are drawn over the boot, glued
-    // to the sole.
-    const strandsInFront = foot.drawOnTop() && foot.state === 'follow' && foot.zone >= 1;
+    // behind the ants in front. Pressed on the street (side view, the sole
+    // hidden) they are behind the front boot itself; lifted, its red sole
+    // faces the camera, so they are drawn over the boot, pulled out of the
+    // squashed ants stuck on the sole.
+    const strandsInFront = foot.drawOnTop() && foot.state === 'follow';
     if (!strandsInFront && this.sticky.strands.length) items.push({ y: foot.sortY() + 0.25, strands: true });
     items.sort((p, q) => p.y - q.y);
     for (const it of items) {

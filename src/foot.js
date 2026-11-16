@@ -219,14 +219,21 @@ export class Leg {
   /**
    * Drag control: a point on the boot's underside (frac -1..1 = left..right
    * along the sole), where the sticky strands are drawn from. Side-on it is
-   * the bottom edge; in the sole view it is on the red sole itself.
+   * the bottom edge; in the sole view it is on the red sole itself (for a
+   * strand with a squashed ant, `sd.su/sv`, exactly on that ant).
    */
-  underside(frac) {
+  underside(frac, sd) {
     const h = this.h;
     const name = ZONE_FRAMES[this.zone];
     if (this.state === 'follow' && h >= FOLLOW_SIDE && name !== 'lift_0') {
       const { m, s, dx, dy } = this.zoneOrigin(name);
       let [ux, uy, a, b] = m.soleAxis;
+      if (sd && sd.su !== undefined) {
+        // a strand comes out of its squashed ant: the same spot drawSmears paints
+        const px = m.sole[0] + ux * a * sd.su * 0.8 - uy * b * sd.sv * 0.7;
+        const py = m.sole[1] + uy * a * sd.su * 0.8 + ux * b * sd.sv * 0.7;
+        return [dx + px * s, dy + py * s];
+      }
       if (ux < 0) {
         ux = -ux;
         uy = -uy;
