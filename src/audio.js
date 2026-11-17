@@ -26,7 +26,9 @@ export function initAudio() {
     const d = noise.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
   }
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  // 'suspended' (never started, or put to sleep by suspendAudio) or, on
+  // iPhone / iPad, 'interrupted' (a call, another app): wake it up
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
 }
 
 export function suspendAudio() {

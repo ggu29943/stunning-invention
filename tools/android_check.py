@@ -3,9 +3,10 @@
 while an emulator is up: installs dist/apk/heelstomp.apk (built with
 APK_WEB_DEBUG=true), starts it, plays a little through adb, looks into the
 page over the WebView's DevTools socket and checks the screen itself
-(screenshots: does it show the menu, does it move during a round). Writes
-report.json, the screenshots (and sheet.jpg) and the app's log to --out.
-Exits 1 if a check failed.
+(screenshots: does it show the menu, does it move during a round). With
+--update-url (the app built as version 1 with that update source) it also
+checks the "new version" dialog. Writes report.json, the screenshots (and
+sheet.jpg) and the app's log to --out. Exits 1 if a check failed.
 
 Needs: adb on PATH, pip packages websocket-client and pillow.
 """
@@ -119,6 +120,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--apk', default='dist/apk/heelstomp.apk')
     ap.add_argument('--out', default='android-check')
+    ap.add_argument('--update-url', default='', help='the APK_UPDATE_URL the app was built with (as version 1)')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -153,6 +155,31 @@ def main():
         shots.append((label, png))
         return png
 
+    def ui_nodes():
+        """Texts on screen with the centre of their boxes (uiautomator), dialogs included."""
+        adb('shell', 'rm', '-f', '/sdcard/ui.xml', check=False)
+        adb('shell', 'uiautomator', 'dump', '/sdcard/ui.xml', check=False, timeout=60)
+        xml = adb('shell', 'cat', '/sdcard/ui.xml', check=False)
+        nodes = {}
+        for m in re.finditer(r'text="([^"]+)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
+            nodes[m.group(1)] = ((int(m.group(2)) + int(m.group(4))) // 2, (int(m.group(3)) + int(m.group(5))) // 2)
+        return nodes
+
+    def update_dialog(timeout):
+        """The app's "new version" dialog, if it shows within timeout: its texts."""
+        end = time.time() + timeout
+        while True:
+            nodes = ui_nodes()
+            if '有新版本' in nodes:
+                return nodes
+            if time.time() >= end:
+                return None
+            time.sleep(1)
+
+    def focused_window():
+        m = re.search(r'mCurrentFocus=.*', adb('shell', 'dumpsys', 'window', check=False))
+        return m.group(0) if m else ''
+
     def tap_css(x, y):
         dpr = page.eval('devicePixelRatio')
         adb('shell', 'input', 'tap', str(round(x * dpr)), str(round(y * dpr)))
@@ -175,6 +202,38 @@ def main():
         t0 = time.time()
         adb('shell', 'am', 'start', '-W', '-n', ACTIVITY)
         page.connect()
+
+        # ---- built as version 1 with the live site as its update source: it
+        # must offer the build that is there, and 以后再说 must put it away
+        def update_offer():
+            nodes = update_dialog(30)
+            check('update dialog appears', nodes is not None)
+            if not nodes:
+                return
+            msg = next((t for t in nodes if t.startswith('新版本')), '')
+            check('update dialog names both versions', re.match(r'新版本 \d+（现在装的是 1）', msg) is not None, msg[:24])
+            time.sleep(0.5)
+            shot('update_dialog')
+            line = re.search(r'update offered: (\d+) \(installed 1\) (\S+)', adb('logcat', '-d', '-s', 'HeelStomp:I', check=False))
+            url = line.group(2) if line else ''
+            info['update'] = {'offered': line.group(1) if line else None, 'url': url}
+            ok = False
+            detail = url
+            if url.startswith(args.update_url + 'heelstomp.apk?v='):
+                try:
+                    req = urllib.request.Request(url, method='HEAD')
+                    with urllib.request.urlopen(req, timeout=30) as r:
+                        detail = f"{url} -> {r.status} {r.headers.get('Content-Type')} {r.headers.get('Content-Length')} bytes"
+                        ok = r.status == 200 and 'android' in (r.headers.get('Content-Type') or '')
+                except Exception as e:
+                    detail = f'{url} -> {e}'
+            check('its download link is the APK on the site', ok, detail)
+            adb('shell', 'input', 'tap', *map(str, nodes['以后再说']))
+            time.sleep(1.5)
+            check('以后再说 closes it, back in the game', '有新版本' not in ui_nodes() and PKG in focused_window(), focused_window())
+
+        if args.update_url:
+            section('update', update_offer)
 
         # ---- starts and shows the menu, landscape, full screen
         def start():
@@ -205,6 +264,10 @@ def main():
                 long_side = max(int(disp[-1][0]), int(disp[-1][1]))
                 covered = env['w'] * env['dpr'] / long_side
                 check('page covers the whole screen width', covered > 0.98, f'{covered:.3f} of {long_side}px')
+            gap = page.eval("""(() => { const a = document.getElementById('btn-timed').getBoundingClientRect(),
+                b = document.getElementById('btn-endless').getBoundingClientRect();
+                return Math.round(Math.max(b.left - a.right, b.top - a.bottom)); })()""")
+            check('space between the two play buttons', gap >= 8, f'{gap} px')
             fps = page.eval(FPS_JS)
             info['menu_fps'] = fps
             # emulators draw in software (a few frames a second); 0 means drawing stopped
@@ -264,6 +327,21 @@ def main():
 
         section('back', back_key)
 
+        # ---- something covers the game (here the notification shade): the
+        # round pauses, and stays paused until 继续
+        def covered():
+            adb('shell', 'cmd', 'statusbar', 'expand-notifications', check=False)
+            paused = page.wait("window.__game.state === 'pause'", 6)
+            check('covered by the notification shade: round paused', paused, focused_window())
+            adb('shell', 'cmd', 'statusbar', 'collapse', check=False)
+            time.sleep(1.5)
+            still = page.eval("({hidden: document.hidden, state: window.__game.state})")
+            check('shade closed: still paused, page visible', still['state'] == 'pause' and not still['hidden'], json.dumps(still))
+            tap_el('#btn-resume')
+            check('继续 resumes', page.wait("window.__game.state === 'play'", 5))
+
+        section('covered', covered)
+
         # ---- home and back: the round pauses, nothing reloads
         def home():
             page.eval('window.__marker = 42')
@@ -305,6 +383,10 @@ def main():
                 time.sleep(4)
                 page.connect()
                 page.wait("!!(window.__game && !document.getElementById('menu').hidden)", 30)
+                if args.update_url:
+                    again = update_dialog(12)  # the activity restarted: it offers the update again
+                    if again:
+                        adb('shell', 'input', 'tap', *map(str, again['以后再说']))
                 time.sleep(1)
                 ins = page.eval("""(() => { const cs = getComputedStyle(document.documentElement);
                     const v = (n) => cs.getPropertyValue(n).trim();

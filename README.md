@@ -87,14 +87,15 @@ https://<用户名>.github.io/<仓库名>/apk/heelstomp.apk
 - 不用联网也能玩；声音、震动、纪录和设置都在
 - 挖孔/刘海屏：画面铺满整块屏幕，按钮和计分避开摄像头
 - 返回键：关闭“设置” → 暂停 / 继续一局 → 结算页回主菜单；在主菜单按返回，App 退到后台
-- 每次启动会去网站上看一眼有没有新版（`apk/version.json`），有就弹窗问要不要下载。新版直接装在旧版上面，纪录和设置都保留
+- 有东西盖住游戏时（下拉通知栏、来电、App 自己的更新弹窗），正在进行的一局自动暂停；切到后台也一样
+- 每次启动会去网站上看一眼有没有新版（`apk/version.json`），有就弹窗问要不要下载（弹窗里写的是内部版本号，数字大的新）。新版直接装在旧版上面，纪录和设置都保留
 - 系统 WebView 太旧（低于 80 版）时会提示去应用商店更新（80 版以上都能玩，在 83 版上检查过）
 
 App 本身是 `android/` 里一个很小的安卓项目：一个全屏 WebView，把打包好的游戏从 `https://appassets.androidplatform.net/`（安卓专门留给 App 内容的地址，不会真的联网）加载出来，所以 ES 模块和 localStorage 跟在网站上一样能用。版本号是最后一次改动游戏或 App 的提交号（内部版本号 = 1000 + 这类提交的个数），只改说明、部署流程之类的提交不会让 App 提示更新。iPad / iPhone 装不了 APK，继续用网页或“添加到主屏幕”。
 
 自己打包：装好 JDK 17+ 和安卓 SDK（平台 35，设置好 `ANDROID_HOME`），运行 `tools/build_apk.sh`，生成 `dist/apk/heelstomp.apk`。签名密钥 `android/heelstomp.keystore`（密码 `heelstomp`）就放在仓库里：每一版都用同一把钥匙签名，新版才能直接覆盖安装。代价是别人也能用它签一个“覆盖版”，所以只从自己的网站下载安装。
 
-在 Actions 页手动运行 “Android app check”（`.github/workflows/android-check.yml`）会在安卓 11 和 15 的模拟器上装上 App，用 `tools/android_check.py` 点开一局、踩几脚、试返回键、切到后台再回来、模拟挖孔屏，并把检查结果、截图和日志附在这次运行里。
+在 Actions 页手动运行 “Android app check”（`.github/workflows/android-check.yml`）会在安卓 11 和 15 的模拟器上装上 App，用 `tools/android_check.py` 检查更新弹窗（检查用的 App 故意打成第 1 版）、点开一局、踩几脚、试返回键、下拉通知栏（要自动暂停）、切到后台再回来、模拟挖孔屏，并把检查结果、截图和日志附在这次运行里。
 
 ## 目录
 

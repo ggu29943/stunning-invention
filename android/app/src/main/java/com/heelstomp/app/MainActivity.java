@@ -106,7 +106,19 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 30) win.setDecorFitsSystemWindows(false);
         if (BuildConfig.WEB_DEBUG) WebView.setWebContentsDebuggingEnabled(true);
 
-        web = new WebView(this);
+        try {
+            web = new WebView(this);
+        } catch (RuntimeException e) {
+            // no usable system WebView right now (being updated, or switched off)
+            Log.e(TAG, "no WebView", e);
+            new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("现在打不开")
+                    .setMessage("系统的网页组件（WebView）现在用不了，可能正在更新。请过一会儿再打开。")
+                    .setPositiveButton("知道了", (d, which) -> finish())
+                    .setOnCancelListener(d -> finish())
+                    .show();
+            return;
+        }
         web.setBackgroundColor(BG);
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         web.setVerticalScrollBarEnabled(false);
@@ -224,7 +236,13 @@ public class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) hideSystemBars();
+        if (hasFocus) {
+            hideSystemBars();
+        } else if (pageLoaded && web != null) {
+            // something covers the game (the "new version" dialog, the
+            // notification shade, a call): a round in progress pauses
+            web.evaluateJavascript("window.heelstompPause&&window.heelstompPause()", null);
+        }
     }
 
     @Override
@@ -372,9 +390,9 @@ public class MainActivity extends Activity {
                 JSONObject v = new JSONObject(readAll(c.getInputStream()));
                 int code = v.getInt("versionCode");
                 if (code <= BuildConfig.VERSION_CODE) return;
-                String name = v.optString("versionName", String.valueOf(code));
-                String apk = base + v.optString("apk", "heelstomp.apk");
-                runOnUiThread(() -> offerUpdate(name, apk));
+                // (the query: no browser or proxy cache hands out an older file)
+                String apk = base + v.optString("apk", "heelstomp.apk") + "?v=" + code;
+                runOnUiThread(() -> offerUpdate(code, apk));
             } catch (Exception e) {
                 Log.i(TAG, "update check: " + e);
             } finally {
@@ -385,11 +403,12 @@ public class MainActivity extends Activity {
         t.start();
     }
 
-    private void offerUpdate(String name, String apkUrl) {
+    private void offerUpdate(int code, String apkUrl) {
         if (isFinishing() || isDestroyed()) return;
+        Log.i(TAG, "update offered: " + code + " (installed " + BuildConfig.VERSION_CODE + ") " + apkUrl);
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("有新版本")
-                .setMessage("新版本 " + name + "（现在装的是 " + BuildConfig.VERSION_NAME + "）。\n"
+                .setMessage("新版本 " + code + "（现在装的是 " + BuildConfig.VERSION_CODE + "）。\n"
                         + "下载后点开安装，直接覆盖旧版，纪录和设置都会保留。")
                 .setPositiveButton("下载", (d, which) -> openExternal(apkUrl))
                 .setNegativeButton("以后再说", null)
@@ -397,6 +416,7 @@ public class MainActivity extends Activity {
     }
 
     private void openExternal(String url) {
+        Log.i(TAG, "opening " + url);
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
         } catch (ActivityNotFoundException e) {

@@ -102,11 +102,15 @@ h2 { font-size: 26px; margin-bottom: 12px; }
 
 .actions {
   display: flex;
-  gap: 10px;
   justify-content: center;
   flex-wrap: wrap;
+  /* 10 px between the buttons, by margins: `gap` in a flex box needs
+     Chromium 84 / Safari 14.1, and on older Android WebViews and iPads the
+     buttons would touch */
+  margin: -5px;
 }
 
+.actions > button { margin: 5px; }
 .actions.column { flex-direction: column; }
 .actions.column > button { flex: 0 0 auto; }
 
@@ -143,11 +147,10 @@ button.primary.alt {
 }
 
 .toggles {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
-  justify-content: center;
   margin-top: 12px;
-  flex-wrap: wrap;
 }
 
 .toggles button {
@@ -256,16 +259,21 @@ button.primary.alt {
   h2 { font-size: 22px; margin-bottom: 6px; }
   h1 { font-size: 22px; }
   .howto { line-height: 1.4; }
-  .actions.column { gap: 6px; }
   .actions.column > button { min-height: 40px; padding: 6px 12px; }
   .stats { gap: 2px 12px; margin-bottom: 8px; }
 }
 
-/* short landscape screens: the pause menu's five buttons go in two columns */
+/* short landscape screens: the pause menu's five buttons go in two columns
+   (a grid: spaced by its gap, which every engine has, not by margins) */
 @media (max-height: 460px) {
   #pause .card { width: min(440px, 100%); }
-  #pause .actions.column { display: grid; grid-template-columns: 1fr 1fr; }
+  #pause .actions.column { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; }
+  #pause .actions.column > button { margin: 0; }
   #pause .actions.column > .primary { grid-column: 1 / -1; }
+}
+
+@media (max-height: 320px) {
+  #pause .actions.column { gap: 6px; }
 }
 
 /* narrow portrait phones (e.g. 320 px wide): the four setting buttons wrap

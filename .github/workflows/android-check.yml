@@ -25,9 +25,13 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      # as version 1 with the live site as its update source, so the check
+      # also sees the "new version" dialog
       - name: Build the app (page inspectable over adb)
         env:
           APK_WEB_DEBUG: 'true'
+          APK_VERSION_CODE: '1'
+          APK_UPDATE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apk/
         run: tools/build_apk.sh || { sleep 60; tools/build_apk.sh; }
       - uses: actions/setup-python@v5
         with:
@@ -45,7 +49,7 @@ jobs:
           target: google_apis
           profile: pixel_6
           disable-animations: true
-          script: python tools/android_check.py --out android-check-${{ matrix.api }}
+          script: python tools/android_check.py --out android-check-${{ matrix.api }} --update-url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/apk/
       - uses: actions/upload-artifact@v4
         if: always()
         with:

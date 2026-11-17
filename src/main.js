@@ -39,10 +39,10 @@ const MAX_STRANDS = 12;
 const MAX_SMEARS = 22;
 
 const $ = (id) => document.getElementById(id);
-// landscape only: a phone or tablet held upright shows the #rotate screen (CSS)
 // running inside the Android app (android/: a full-screen WebView that serves
 // the bundled game from this reserved host)
 const IN_APP = location.hostname === 'appassets.androidplatform.net';
+// landscape only: a phone or tablet held upright shows the #rotate screen (CSS)
 const UPRIGHT = window.matchMedia ? window.matchMedia('(orientation: portrait) and (pointer: coarse)') : null;
 
 class Game {
@@ -247,6 +247,7 @@ class Game {
     this.redHold = 0;
     this.portraitPulse = 0;
     this.lastLevel = 0;
+    this.hitstop = 0;
     this.press = null;
     this.pressHints = 0;
     this.clearSticky();
@@ -456,7 +457,7 @@ class Game {
     if (p.mode === 'grind') {
       if (this.foot.state === 'grinding') this.foot.state = 'planted';
       this.pointer = null;
-      this.stepDelay = 0.1; // let the back leg clear a foot that was slid next to it
+      this.stepDelay = 0.1; // the back leg catches up if the grind slid the boot far away
       return;
     }
     if (p.queued) {
@@ -886,8 +887,8 @@ class Game {
     const h = contact - sole;
     return {
       x: this.reachX(ptr.x),
-      // the finger itself (a grind starts, and the back leg steps around,
-      // from where the finger really is, not from the stride-limited x)
+      // the finger itself (a grind starts from where the finger really is,
+      // not from the stride-limited x)
       fx: clamp(ptr.x, 40, this.W - 40),
       // within half a pixel counts as on the street (float noise must not
       // leave the boot hovering a hair above it)
@@ -1647,7 +1648,9 @@ async function boot() {
       $('load-bar').style.width = `${Math.round(k * 100)}%`;
     });
   } catch (err) {
-    $('load-msg').textContent = `加载失败：${err.message}。请通过 http 服务器打开（不能直接双击 html）。`;
+    $('load-msg').textContent = IN_APP
+      ? `加载失败：${err.message}。请把 App 关掉再打开试试。`
+      : `加载失败：${err.message}。请通过 http 服务器打开（不能直接双击 html）。`;
     return;
   }
   const game = new Game($('game'), assets);
@@ -1672,6 +1675,12 @@ async function boot() {
     lastDown = pressTime(e);
     downAt.set(e.pointerId, lastDown);
   }, true);
+  // every touch gets a new pointerId: forget a finger a moment after it has
+  // lifted (its click, if any, comes right after the pointerup), so the map
+  // does not grow all session
+  const forget = (e) => setTimeout(() => downAt.delete(e.pointerId), 1000);
+  document.addEventListener('pointerup', forget, true);
+  document.addEventListener('pointercancel', forget, true);
   document.addEventListener('touchstart', (e) => { lastDown = pressTime(e); }, { capture: true, passive: true });
   document.addEventListener('click', (e) => {
     if (!e.target.closest?.('button') || !ui.shownAt) return;
@@ -1746,10 +1755,12 @@ async function boot() {
     ui.openSettings(game, 'menu');
   });
   $('btn-settings2').addEventListener('click', () => {
+    sfx.initAudio(); // (the sound was suspended if the page was in the background)
     sfx.click();
     ui.openSettings(game, 'pause');
   });
   $('btn-back').addEventListener('click', () => {
+    sfx.initAudio();
     sfx.click();
     ui.closeSettings(game);
   });
@@ -1771,6 +1782,10 @@ async function boot() {
     if (UPRIGHT.addEventListener) UPRIGHT.addEventListener('change', onUpright);
     else if (UPRIGHT.addListener) UPRIGHT.addListener(onUpright);
   }
+
+  // the Android app pauses the round when something covers the game (its
+  // "new version" dialog, the notification shade, a call)
+  window.heelstompPause = () => game.pause();
 
   // the Android app's back button: closes 设置, pauses / resumes a round,
   // leaves the results card. Returns false on the main menu, where the app
