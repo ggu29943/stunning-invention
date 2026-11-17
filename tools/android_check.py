@@ -56,9 +56,12 @@ class Page:
         end = time.time() + timeout
         last = None
         while time.time() < end:
+            # this app's socket: other apps' WebViews (debuggable on emulator
+            # images) have sockets of their own
+            pids = adb('shell', 'pidof', PKG, check=False).split()
             socks = re.findall(r'@(webview_devtools_remote_\d+)', adb('shell', 'cat', '/proc/net/unix', check=False))
-            if socks:
-                adb('forward', 'tcp:9222', 'localabstract:' + socks[-1], check=False)
+            for sock in [x for x in socks if x.rsplit('_', 1)[1] in pids]:
+                adb('forward', 'tcp:9222', 'localabstract:' + sock, check=False)
                 try:
                     pages = json.load(urllib.request.urlopen('http://127.0.0.1:9222/json', timeout=5))
                     for p in pages:
@@ -219,8 +222,20 @@ def main():
         # ---- built as version 1 with the live site as its update source: it
         # must offer the build that is there, and 以后再说 must put it away
         def update_offer():
-            nodes = update_dialog(30)
-            check('update dialog appears', nodes is not None)
+            nodes = update_dialog(20)
+            tries = 0
+            while not nodes and tries < 4:
+                # a freshly booted emulator may have no network yet when the
+                # app starts (the check fails quietly); the app checks again
+                # each time it comes to the front, so leave and come back
+                tries += 1
+                adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
+                time.sleep(2)
+                adb('shell', 'am', 'start', '-W', '-n', ACTIVITY)
+                nodes = update_dialog(15)
+            failed = re.findall(r'update check failed: .*', adb('logcat', '-d', '-s', 'HeelStomp:I', check=False))
+            info['update_offer'] = {'returns_needed': tries, 'failed_checks': failed[:3]}
+            check('update dialog appears', nodes is not None, f'after {tries} return(s) to the app' if tries else '')
             if not nodes:
                 return
             msg = next((t for t in nodes if t.startswith('新版本')), '')
@@ -426,7 +441,14 @@ def main():
         def self_update():
             live = json.load(urllib.request.urlopen(args.update_url + 'version.json?t=' + str(int(time.time())), timeout=20))
             info['live_version'] = live
-            page.wait("!!(window.__game && window.__game.state === 'menu' && !document.getElementById('menu').hidden)", 10)
+            # (switching the cutout off restarted the page: connect afresh)
+            time.sleep(2)
+            page.connect()
+            page.wait("!!(window.__game && window.__game.state === 'menu' && !document.getElementById('menu').hidden)", 30)
+            stray = update_dialog(3)
+            if stray:
+                adb('shell', 'input', 'tap', *map(str, stray['以后再说']))
+                time.sleep(1)
             tap_el('#btn-settings')
             page.wait("!document.getElementById('settings').hidden", 5)
             ver = page.eval("({ text: document.getElementById('ver').textContent, button: !document.getElementById('btn-update').hidden })")
