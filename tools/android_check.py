@@ -504,12 +504,25 @@ def main():
                 time.sleep(2)
                 code = installed_code()
             check('the site\'s version is installed', code == live['versionCode'], f"installed {code}, site {live['versionCode']}")
-            # the new version starts, up to date: no offer
-            adb('shell', 'am', 'start', '-W', '-n', ACTIVITY, check=False)
-            time.sleep(6)
-            offered = update_dialog(3)
-            check('the updated app starts, nothing more to offer', PKG in focused_window() and offered is None, focused_window())
-            shot('updated')
+            # the new version starts, up to date: no offer. (The system keeps
+            # the package locked for a moment after the version changes, and
+            # refuses to start it meanwhile: try again until it starts.)
+            started = False
+            end = time.time() + 60
+            while time.time() < end and not started:
+                time.sleep(3)
+                adb('shell', 'am', 'start', '-n', ACTIVITY, check=False, timeout=30)
+                time.sleep(3)
+                f = focused_window()
+                started = PKG in f and 'packageinstaller' not in f
+            menu = 0.0
+            offered = None
+            if started:
+                time.sleep(8)  # (no DevTools in the site's build: look at the screen)
+                offered = update_dialog(3)
+                menu = pink_share(shot('updated'))
+            check('the updated app starts and shows the menu, nothing more to offer',
+                  started and menu > 0.01 and offered is None, f'{focused_window()} pink {menu:.3f}')
 
         if args.update_url:
             section('self-update', self_update)
