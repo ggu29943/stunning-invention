@@ -50,6 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version number 设置 shows counts commits
       - name: Assemble site (runtime files only)
         run: tools/build_site.sh _site
       - name: Add the Android app

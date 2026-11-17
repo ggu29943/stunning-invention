@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- navigator.vibrate() in the WebView -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- updating itself: hands the downloaded new version to the system installer
+         (the player switches it on once, "install unknown apps") -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -27,5 +30,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- the downloaded update, for the installer only (see ApkProvider) -->
+        <provider
+            android:name=".ApkProvider"
+            android:authorities="com.heelstomp.app.updates"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

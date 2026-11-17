@@ -5,8 +5,11 @@ APK_WEB_DEBUG=true), starts it, plays a little through adb, looks into the
 page over the WebView's DevTools socket and checks the screen itself
 (screenshots: does it show the menu, does it move during a round). With
 --update-url (the app built as version 1 with that update source) it also
-checks the "new version" dialog. Writes report.json, the screenshots (and
-sheet.jpg) and the app's log to --out. Exits 1 if a check failed.
+checks the "new version" dialog and, last, the whole self-update: 设置 ->
+检查更新 -> 更新 -> download -> allow installs -> the system installer ->
+the site's version is what is installed. Writes report.json, the
+screenshots (and sheet.jpg) and the app's log to --out. Exits 1 if a check
+failed.
 
 Needs: adb on PATH, pip packages websocket-client and pillow.
 """
@@ -164,6 +167,16 @@ def main():
         for m in re.finditer(r'text="([^"]+)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
             nodes[m.group(1)] = ((int(m.group(2)) + int(m.group(4))) // 2, (int(m.group(3)) + int(m.group(5))) // 2)
         return nodes
+
+    def installer_button():
+        """The system installer's 安装 / 更新 button, if the installer is showing."""
+        adb('shell', 'rm', '-f', '/sdcard/ui.xml', check=False)
+        adb('shell', 'uiautomator', 'dump', '/sdcard/ui.xml', check=False, timeout=60)
+        xml = adb('shell', 'cat', '/sdcard/ui.xml', check=False)
+        for m in re.finditer(r'<node [^>]*?text="([^"]*)"[^>]*?package="([^"]*)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
+            if 'packageinstaller' in m.group(2) and m.group(1).strip().lower() in ('update', 'install', '更新', '安装'):
+                return ((int(m.group(3)) + int(m.group(5))) // 2, (int(m.group(4)) + int(m.group(6))) // 2)
+        return None
 
     def update_dialog(timeout):
         """The app's "new version" dialog, if it shows within timeout: its texts."""
@@ -384,7 +397,9 @@ def main():
                 page.connect()
                 page.wait("!!(window.__game && !document.getElementById('menu').hidden)", 30)
                 if args.update_url:
-                    again = update_dialog(12)  # the activity restarted: it offers the update again
+                    # restarted in the same process: the answered version is not
+                    # offered again for an hour (dismiss it if it is, all the same)
+                    again = update_dialog(4)
                     if again:
                         adb('shell', 'input', 'tap', *map(str, again['以后再说']))
                 time.sleep(1)
@@ -402,6 +417,80 @@ def main():
                 adb('shell', 'cmd', 'overlay', 'disable', pick, check=False)
 
         section('cutout', cutout)
+
+        # ---- 设置 shows the version; 检查更新 -> 更新 installs the site's build
+        def installed_code():
+            m = re.search(r'versionCode=(\d+)', adb('shell', 'dumpsys', 'package', PKG, check=False))
+            return int(m.group(1)) if m else None
+
+        def self_update():
+            live = json.load(urllib.request.urlopen(args.update_url + 'version.json?t=' + str(int(time.time())), timeout=20))
+            info['live_version'] = live
+            page.wait("!!(window.__game && window.__game.state === 'menu' && !document.getElementById('menu').hidden)", 10)
+            tap_el('#btn-settings')
+            page.wait("!document.getElementById('settings').hidden", 5)
+            ver = page.eval("({ text: document.getElementById('ver').textContent, button: !document.getElementById('btn-update').hidden })")
+            check('设置 shows the app version and 检查更新', ver['text'] == 'App 版本 1' and ver['button'], json.dumps(ver, ensure_ascii=False))
+            settle()
+            shot('settings_version')
+            tap_el('#btn-update')
+            nodes = update_dialog(20)
+            check('检查更新 offers the new version again (it was turned down)', nodes is not None)
+            if not nodes:
+                return
+            adb('shell', 'input', 'tap', *map(str, nodes['更新']))
+            # downloading; then either the one-time "allow installs" step or the installer
+            end = time.time() + 90
+            stage = None
+            button = None
+            while time.time() < end:
+                nodes = ui_nodes()
+                if '还差一步' in nodes:
+                    stage = 'allow'
+                    break
+                button = installer_button()
+                if button:
+                    stage = 'installer'
+                    break
+                time.sleep(1)
+            check('更新 downloads it', stage is not None, stage or focused_window())
+            if stage == 'allow':
+                shot('allow_installs')
+                adb('shell', 'input', 'tap', *map(str, nodes['去打开']))
+                time.sleep(2.5)
+                f = focused_window()
+                check('去打开 opens the system switch for installing apps', 'settings' in f.lower(), f)
+                # (on a phone the player flips the switch; here adb does)
+                adb('shell', 'appops', 'set', PKG, 'REQUEST_INSTALL_PACKAGES', 'allow')
+                adb('shell', 'input', 'keyevent', 'KEYCODE_BACK')
+                end = time.time() + 30
+                while time.time() < end:
+                    button = installer_button()
+                    if button:
+                        stage = 'installer'
+                        break
+                    time.sleep(1)
+                check('back in the app, the install goes on', stage == 'installer', focused_window())
+            if stage != 'installer':
+                return
+            time.sleep(0.5)
+            shot('installer')
+            adb('shell', 'input', 'tap', *map(str, button))
+            end = time.time() + 90
+            code = installed_code()
+            while time.time() < end and code != live['versionCode']:
+                time.sleep(2)
+                code = installed_code()
+            check('the site\'s version is installed', code == live['versionCode'], f"installed {code}, site {live['versionCode']}")
+            # the new version starts, up to date: no offer
+            adb('shell', 'am', 'start', '-W', '-n', ACTIVITY, check=False)
+            time.sleep(6)
+            offered = update_dialog(3)
+            check('the updated app starts, nothing more to offer', PKG in focused_window() and offered is None, focused_window())
+            shot('updated')
+
+        if args.update_url:
+            section('self-update', self_update)
     except Exception as e:
         check('check ran', False, f'{type(e).__name__}: {e}'[:300])
         traceback.print_exc()

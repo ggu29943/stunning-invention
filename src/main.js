@@ -1546,6 +1546,24 @@ const ui = {
     // the Android app is always full screen
     const fsOk = !IN_APP && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
     $('btn-fs').hidden = !fsOk;
+    this.refreshVersion();
+  },
+  /**
+   * 设置 shows which version this is: the app's own number inside the
+   * Android app (which also gets 检查更新), else the web site's (the same
+   * numbering, written into the page when the site is built).
+   */
+  refreshVersion() {
+    const app = IN_APP ? window.HeelStompApp : null;
+    let label = '';
+    try {
+      if (app) label = `App 版本 ${app.versionCode()}`;
+      else if (document.documentElement.dataset.version) label = `网页版本 ${document.documentElement.dataset.version}`;
+    } catch {
+      /* no bridge */
+    }
+    $('ver').textContent = label;
+    $('btn-update').hidden = !app;
   },
   /** Control-mode button labels and the matching how-to lines. */
   refreshControl(g) {
@@ -1763,6 +1781,16 @@ async function boot() {
     sfx.initAudio();
     sfx.click();
     ui.closeSettings(game);
+  });
+  // Android app: look for a newer version now (the app shows the answer)
+  $('btn-update').addEventListener('click', () => {
+    sfx.initAudio();
+    sfx.click();
+    try {
+      window.HeelStompApp?.checkUpdate();
+    } catch {
+      /* no bridge */
+    }
   });
   // warm the other skin in the background so switching is instant
   for (const name of Object.keys(SKINS)) if (name !== game.settings.skin) loadSkin(name).catch(() => {});

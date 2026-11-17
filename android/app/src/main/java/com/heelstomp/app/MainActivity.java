@@ -4,11 +4,15 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
 import android.graphics.Rect;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.DisplayCutout;
 import android.view.View;
@@ -18,6 +22,7 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.ConsoleMessage;
+import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -25,13 +30,20 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -82,8 +94,23 @@ public class MainActivity extends Activity {
         MIME.put("woff2", "font/woff2");
     }
 
+    /**
+     * The newer version the player last answered (更新 or 以后再说), and when:
+     * coming back to the app does not offer it again for an hour (检查更新 in
+     * 设置 always does).
+     */
+    private static int answeredCode;
+    private static long answeredAt;
+    private static final long REOFFER_MS = 60 * 60 * 1000;
+
     private WebView web;
     private boolean pageLoaded;
+    private boolean resumed;
+    private boolean checking; // an update check is under way ...
+    private boolean checkAsked; // ... and the player asked for it (检查更新): say how it went
+    private boolean downloading;
+    private volatile boolean downloadCancelled;
+    private AlertDialog updateDialog; // whichever update dialog is showing
     /** Camera-cutout insets in CSS px (= dp): top, right, bottom, left. */
     private final float[] insets = new float[4];
 
@@ -139,6 +166,7 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
 
+        web.addJavascriptInterface(new PageBridge(), "HeelStompApp");
         web.setWebViewClient(new GameClient());
         web.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -160,7 +188,7 @@ public class MainActivity extends Activity {
         web.loadUrl(START_URL);
 
         warnIfWebViewTooOld();
-        checkForUpdate();
+        if (savedInstanceState == null) dropOldDownloads();
     }
 
     // ------------------------------------------------------------ screen
@@ -246,14 +274,27 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // every time the app comes to the front (a phone keeps it alive in the
+        // background for days: checking only when it is first opened is not enough)
+        checkForUpdate(false);
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         if (web != null) web.onResume();
         hideSystemBars();
+        // back from switching on "install unknown apps", or a download that
+        // finished while the app was in the background
+        resumePendingInstall();
     }
 
     @Override
     protected void onPause() {
+        resumed = false;
         // the page sees visibilitychange (hidden): a round in progress pauses
         if (web != null) web.onPause();
         super.onPause();
@@ -289,6 +330,24 @@ public class MainActivity extends Activity {
     }
 
     // ------------------------------------------------------------ the page
+
+    /** What the page may ask the app (window.HeelStompApp): the 设置 page shows the version and a 检查更新 button. */
+    private final class PageBridge {
+        @JavascriptInterface
+        public int versionCode() {
+            return BuildConfig.VERSION_CODE;
+        }
+
+        @JavascriptInterface
+        public String versionName() {
+            return BuildConfig.VERSION_NAME;
+        }
+
+        @JavascriptInterface
+        public void checkUpdate() {
+            runOnUiThread(() -> checkForUpdate(true));
+        }
+    }
 
     private final class GameClient extends WebViewClient {
         @Override
@@ -373,11 +432,32 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    /** Once per start: is there a newer build on the game's web site? */
-    private void checkForUpdate() {
+    // ------------------------------------------------------------ updates
+    //
+    // Every push publishes a new APK on the game's web site (apk/heelstomp.apk,
+    // apk/version.json). The app looks there whenever it comes to the front;
+    // 更新 downloads the new APK itself and hands it to the system installer,
+    // which installs it over this one (same key, so records and settings stay).
+
+    /**
+     * Is there a newer build on the game's web site? Asked every time the app
+     * comes to the front, and by the 检查更新 button (asked = true: the player
+     * is told the result either way, and is offered a version again that they
+     * turned down before).
+     */
+    private void checkForUpdate(boolean asked) {
+        if (web == null || downloading || (updateDialog != null && updateDialog.isShowing())) return;
         final String base = BuildConfig.UPDATE_URL;
-        if (base.isEmpty()) return;
+        if (base.isEmpty()) {
+            if (asked) toast("这个安装包没有设置更新地址");
+            return;
+        }
+        checkAsked |= asked;
+        if (checking) return;
+        checking = true;
         Thread t = new Thread(() -> {
+            int found = -1;
+            String apk = null;
             HttpURLConnection c = null;
             try {
                 // the query gets past the web site's cache
@@ -386,33 +466,277 @@ public class MainActivity extends Activity {
                 c.setConnectTimeout(6000);
                 c.setReadTimeout(6000);
                 c.setUseCaches(false);
-                if (c.getResponseCode() != 200) return;
-                JSONObject v = new JSONObject(readAll(c.getInputStream()));
-                int code = v.getInt("versionCode");
-                if (code <= BuildConfig.VERSION_CODE) return;
-                // (the query: no browser or proxy cache hands out an older file)
-                String apk = base + v.optString("apk", "heelstomp.apk") + "?v=" + code;
-                runOnUiThread(() -> offerUpdate(code, apk));
+                if (c.getResponseCode() == 200) {
+                    JSONObject v = new JSONObject(readAll(c.getInputStream()));
+                    found = v.getInt("versionCode");
+                    // (the query: no browser or proxy cache hands out an older file)
+                    apk = base + v.optString("apk", "heelstomp.apk") + "?v=" + found;
+                }
+                Log.i(TAG, "update check: the site has " + found + ", installed " + BuildConfig.VERSION_CODE);
             } catch (Exception e) {
-                Log.i(TAG, "update check: " + e);
+                Log.i(TAG, "update check failed: " + e);
             } finally {
                 if (c != null) c.disconnect();
             }
+            final int code = found;
+            final String apkUrl = apk;
+            runOnUiThread(() -> updateChecked(code, apkUrl));
         }, "update-check");
         t.setDaemon(true);
         t.start();
     }
 
+    private void updateChecked(int code, String apkUrl) {
+        boolean asked = checkAsked;
+        checking = false;
+        checkAsked = false;
+        if (isFinishing() || isDestroyed() || web == null) return;
+        if (code < 0) {
+            if (asked) toast("检查失败：连不上游戏网站，看看网络");
+        } else if (code <= BuildConfig.VERSION_CODE) {
+            if (asked) toast("已经是最新版（" + BuildConfig.VERSION_CODE + "）");
+        } else if (asked || code != answeredCode || SystemClock.elapsedRealtime() - answeredAt > REOFFER_MS) {
+            offerUpdate(code, apkUrl);
+        }
+    }
+
+    private AlertDialog.Builder dialog() {
+        return new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert);
+    }
+
     private void offerUpdate(int code, String apkUrl) {
-        if (isFinishing() || isDestroyed()) return;
+        if (updateDialog != null && updateDialog.isShowing()) return;
         Log.i(TAG, "update offered: " + code + " (installed " + BuildConfig.VERSION_CODE + ") " + apkUrl);
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        updateDialog = dialog()
                 .setTitle("有新版本")
                 .setMessage("新版本 " + code + "（现在装的是 " + BuildConfig.VERSION_CODE + "）。\n"
-                        + "下载后点开安装，直接覆盖旧版，纪录和设置都会保留。")
-                .setPositiveButton("下载", (d, which) -> openExternal(apkUrl))
+                        + "点“更新”会自动下载并弹出安装，装好后纪录和设置都在。")
+                .setPositiveButton("更新", (d, which) -> download(code, apkUrl))
                 .setNegativeButton("以后再说", null)
+                .setOnDismissListener(d -> {
+                    answeredCode = code;
+                    answeredAt = SystemClock.elapsedRealtime();
+                })
                 .show();
+    }
+
+    /** 更新: download the new APK into the app's cache, with a progress bar, then install it. */
+    private void download(int code, String apkUrl) {
+        File apk = new File(ApkProvider.dir(this), "heelstomp-" + code + ".apk");
+        if (isGoodUpdate(apk, code)) {
+            install(apk, code); // downloaded before (the installer was left without installing)
+            return;
+        }
+        downloading = true;
+        downloadCancelled = false;
+        AlertDialog.Builder b = dialog();
+        float dp = getResources().getDisplayMetrics().density;
+        LinearLayout box = new LinearLayout(b.getContext());
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(Math.round(24 * dp), Math.round(12 * dp), Math.round(24 * dp), 0);
+        ProgressBar bar = new ProgressBar(b.getContext(), null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(100);
+        bar.setIndeterminate(true);
+        TextView label = new TextView(b.getContext());
+        label.setText("连接中…");
+        label.setPadding(0, Math.round(8 * dp), 0, 0);
+        box.addView(bar);
+        box.addView(label);
+        updateDialog = b.setTitle("正在下载新版本 " + code)
+                .setView(box)
+                .setCancelable(false)
+                .setNegativeButton("取消", (d, which) -> downloadCancelled = true)
+                .show();
+        Log.i(TAG, "downloading " + apkUrl);
+        Thread t = new Thread(() -> {
+            File part = new File(apk.getPath() + ".part");
+            String error = null;
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) new URL(apkUrl).openConnection();
+                c.setConnectTimeout(10000);
+                c.setReadTimeout(20000);
+                c.setUseCaches(false);
+                int status = c.getResponseCode();
+                if (status != 200) throw new IOException("HTTP " + status);
+                long total = c.getContentLengthLong();
+                try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(part)) {
+                    byte[] buf = new byte[16384];
+                    long got = 0;
+                    int shown = -2;
+                    for (int n; (n = in.read(buf)) > 0; ) {
+                        if (downloadCancelled) throw new IOException("cancelled");
+                        out.write(buf, 0, n);
+                        got += n;
+                        int pct = total > 0 ? (int) (got * 100 / total) : -1;
+                        if (pct != shown) {
+                            shown = pct;
+                            final long g = got;
+                            runOnUiThread(() -> showProgress(bar, label, pct, g, total));
+                        }
+                    }
+                }
+                if (!part.renameTo(apk)) throw new IOException("could not keep the file");
+                // a broken download or a "please log in" page from the network
+                // is not handed to the installer
+                if (!isGoodUpdate(apk, code)) throw new IOException("not version " + code + " of this app");
+            } catch (Exception e) {
+                error = e.toString();
+                //noinspection ResultOfMethodCallIgnored
+                apk.delete();
+            } finally {
+                if (c != null) c.disconnect();
+                //noinspection ResultOfMethodCallIgnored
+                part.delete();
+            }
+            final String err = error;
+            runOnUiThread(() -> downloaded(code, apkUrl, apk, err));
+        }, "update-download");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void showProgress(ProgressBar bar, TextView label, int pct, long got, long total) {
+        bar.setIndeterminate(pct < 0);
+        if (pct >= 0) bar.setProgress(pct);
+        label.setText(pct >= 0
+                ? String.format(Locale.ROOT, "%d%%（%.1f / %.1f MB）", pct, got / 1048576.0, total / 1048576.0)
+                : String.format(Locale.ROOT, "%.1f MB", got / 1048576.0));
+    }
+
+    private void downloaded(int code, String apkUrl, File apk, String error) {
+        downloading = false;
+        if (updateDialog != null && updateDialog.isShowing()) updateDialog.dismiss();
+        updateDialog = null;
+        if (downloadCancelled || isFinishing() || isDestroyed()) return;
+        if (error != null) {
+            Log.w(TAG, "update download failed: " + error);
+            updateDialog = dialog()
+                    .setTitle("下载失败")
+                    .setMessage("新版本没下载下来，可能是网络不好。")
+                    .setPositiveButton("重试", (d, which) -> download(code, apkUrl))
+                    .setNeutralButton("用浏览器下载", (d, which) -> openExternal(apkUrl))
+                    .setNegativeButton("算了", null)
+                    .show();
+            return;
+        }
+        install(apk, code);
+    }
+
+    /** The downloaded file really is a newer build of this app, version `code`. */
+    @SuppressWarnings("deprecation")
+    private boolean isGoodUpdate(File apk, int code) {
+        if (!apk.isFile()) return false;
+        PackageInfo pi = getPackageManager().getPackageArchiveInfo(apk.getPath(), 0);
+        if (pi == null || !getPackageName().equals(pi.packageName)) return false;
+        long vc = Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode;
+        return vc == code && vc > BuildConfig.VERSION_CODE;
+    }
+
+    /**
+     * Hand the downloaded APK to the system installer. The very first time the
+     * player has to allow this app to install apps (a switch in the system
+     * settings); the install goes on when they come back.
+     */
+    private void install(File apk, int code) {
+        if (!resumed) {
+            // in the background: Android does not let it open the installer now
+            savePending(apk, code);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            savePending(apk, code);
+            updateDialog = dialog()
+                    .setTitle("还差一步")
+                    .setMessage("第一次在 App 里更新，要允许“高跟踩蚂蚁”安装应用。\n"
+                            + "点“去打开”，在下一页打开开关，然后返回这里，会接着安装。")
+                    .setPositiveButton("去打开", (d, which) -> openInstallSettings())
+                    .setNegativeButton("取消", (d, which) -> clearPending())
+                    .setOnCancelListener(d -> clearPending())
+                    .show();
+            return;
+        }
+        clearPending();
+        Uri uri = ApkProvider.uriFor(apk);
+        Log.i(TAG, "installing " + uri);
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, ApkProvider.APK_MIME)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        } catch (ActivityNotFoundException e) {
+            toast("这台手机打不开安装界面，请在设置里点“检查更新”后用浏览器下载");
+        }
+    }
+
+    private void openInstallSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
+        } catch (ActivityNotFoundException e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES));
+            } catch (ActivityNotFoundException e2) {
+                toast("找不到这个设置：请在系统设置里允许“高跟踩蚂蚁”安装应用");
+            }
+        }
+    }
+
+    // a downloaded update waiting to be installed survives the app being
+    // restarted (some phones restart it when "install unknown apps" is switched)
+    private SharedPreferences updatePrefs() {
+        return getSharedPreferences("update", MODE_PRIVATE);
+    }
+
+    private void savePending(File apk, int code) {
+        updatePrefs().edit().putString("apk", apk.getPath()).putInt("code", code).apply();
+    }
+
+    private void clearPending() {
+        updatePrefs().edit().clear().apply();
+    }
+
+    private void resumePendingInstall() {
+        if (web == null || downloading || (updateDialog != null && updateDialog.isShowing())) return;
+        String path = updatePrefs().getString("apk", null);
+        if (path == null) return;
+        int code = updatePrefs().getInt("code", 0);
+        File apk = new File(path);
+        if (!isGoodUpdate(apk, code)) {
+            clearPending();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
+            // came back without switching it on
+            clearPending();
+            updateDialog = dialog()
+                    .setTitle("没装上")
+                    .setMessage("还没允许“高跟踩蚂蚁”安装应用，所以新版本没装上。")
+                    .setPositiveButton("再去打开", (d, which) -> {
+                        savePending(apk, code);
+                        openInstallSettings();
+                    })
+                    .setNegativeButton("以后再说", null)
+                    .show();
+            return;
+        }
+        install(apk, code);
+    }
+
+    /** Fresh start: downloads of this version or older are installed (or dead): remove them. */
+    private void dropOldDownloads() {
+        File[] files = ApkProvider.dir(this).listFiles();
+        if (files == null) return;
+        Pattern name = Pattern.compile("heelstomp-(\\d+)\\.apk");
+        for (File f : files) {
+            Matcher m = name.matcher(f.getName());
+            if (!m.matches() || Integer.parseInt(m.group(1)) <= BuildConfig.VERSION_CODE) {
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            }
+        }
+    }
+
+    private void toast(String text) {
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
     }
 
     private void openExternal(String url) {

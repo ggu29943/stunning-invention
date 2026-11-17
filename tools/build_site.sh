@@ -19,6 +19,13 @@ VER="$(git rev-parse --short HEAD 2>/dev/null || date +%s)"
 sed -i "s#src=\"src/main.js\"#src=\"src/main.js?v=$VER\"#; s#href=\"style.css\"#href=\"style.css?v=$VER\"#" "$OUT/index.html"
 sed -i "s#from '\./\([A-Za-z0-9_]*\)\.js'#from './\1.js?v=$VER'#g" "$OUT"/src/*.js
 grep -q "main.js?v=$VER" "$OUT/index.html" || { echo "cache tag missing in index.html" >&2; exit 1; }
+# the version number 设置 shows: the app's own when tools/build_apk.sh builds
+# it, else tools/app_version.sh (none in a shallow clone)
+NUM="${APK_VERSION_CODE:-$(tools/app_version.sh 2>/dev/null | cut -d' ' -f1 || true)}"
+if [ -n "$NUM" ]; then
+  sed -i "s#<html lang=\"zh-CN\">#<html lang=\"zh-CN\" data-version=\"$NUM\">#" "$OUT/index.html"
+  grep -q "data-version=\"$NUM\"" "$OUT/index.html" || { echo "version missing in index.html" >&2; exit 1; }
+fi
 # every file the page references must be present
 for f in index.html style.css manifest.webmanifest src/main.js assets/sprites/hd/sprites.json assets/sprites/stockings/sprites.json assets/sprites/stockings/lift_1.webp assets/icons/icon-192.png; do
   test -s "$OUT/$f" || { echo "missing $f" >&2; exit 1; }
